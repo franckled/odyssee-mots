@@ -1,7 +1,7 @@
 name: odyssee_mots
 description: "Odyssée Mots — invente, lis et vis tes propres contes."
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.1.2+3
 
 environment:
   sdk: ^3.6.0
