@@ -1,0 +1,7 @@
+{
+  // Configuration du Worker Odyssée Mots (utilisée si Cloudflare est relié au dépôt GitHub)
+  "name": "odyssee-mots",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true }
+}
