@@ -20,7 +20,7 @@
  * tout repart vers l'application et disparaît du serveur.
  */
 
-const DEFAULT_GEMINI_TEXT_MODELS = "gemini-3-flash-preview,gemini-2.5-flash";
+const DEFAULT_GEMINI_TEXT_MODELS = "gemini-3-flash-preview,gemini-2.5-flash,gemini-2.5-flash-lite";
 const DEFAULT_GEMINI_IMAGE_MODELS =
   "gemini-3.1-flash-image,gemini-3.1-flash-image-preview,gemini-2.5-flash-image";
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-5-5";
@@ -452,12 +452,11 @@ async function drawImage(body, env, cors) {
       headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
       body: JSON.stringify(payload),
     });
-    if (res.status === 404 || res.status === 400) {
-      lastError = `${model}: ${res.status} ${(await res.text()).slice(0, 300)}`;
-      if (res.status === 404) continue;
-      throw new Error(lastError);
+    if (!res.ok) {
+      lastError += ` | ${model} ${res.status}: ${googleMessage(await res.text())}`;
+      if (res.status === 401 || res.status === 403) break;
+      continue;
     }
-    if (!res.ok) throw new Error(`${model}: ${res.status} ${(await res.text()).slice(0, 300)}`);
     // On renvoie la réponse de Google telle quelle (l'app y lit l'image) :
     // le serveur n'a pas à décoder plusieurs mégaoctets.
     return new Response(res.body, {
@@ -465,7 +464,7 @@ async function drawImage(body, env, cors) {
       headers: { ...cors, "Content-Type": "application/json" },
     });
   }
-  throw new Error("Aucun modèle d'image disponible. " + lastError);
+  throw publicError(502, "Illustration impossible" + lastError);
 }
 
 const STRICT_SAFETY = [
@@ -502,7 +501,7 @@ async function callText(env, { system, user, temperature, maxTokens, fast }) {
   }
 
   const models = list(env.GEMINI_TEXT_MODELS, DEFAULT_GEMINI_TEXT_MODELS);
-  let lastError = "";
+  const errors = [];
   for (const model of models) {
     const res = await fetch(geminiUrl(model), {
       method: "POST",
@@ -518,17 +517,19 @@ async function callText(env, { system, user, temperature, maxTokens, fast }) {
         safetySettings: STRICT_SAFETY,
       }),
     });
-    if (res.status === 404) {
-      lastError = `${model}: 404`;
-      continue;
+    if (!res.ok) {
+      const msg = await res.text();
+      errors.push(`${model} ${res.status}: ${googleMessage(msg)}`);
+      // Clé refusée : inutile d'essayer un autre modèle.
+      if (res.status === 401 || res.status === 403) break;
+      continue; // modèle absent, non pris en charge ou quota épuisé : on essaie le suivant
     }
-    if (!res.ok) throw new Error(`Gemini ${model} ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const data = await res.json();
     const cand = (data.candidates || [])[0];
     if (!cand || !cand.content) return ""; // bloqué par les filtres Google → traité comme refus
     return (cand.content.parts || []).filter((p) => p.text && !p.thought).map((p) => p.text).join("");
   }
-  throw new Error("Aucun modèle de texte disponible. " + lastError);
+  throw publicError(502, "Google Gemini refuse la demande : " + errors.join(" | "));
 }
 
 /* ------------------------------------------------------------------ */
@@ -610,6 +611,15 @@ function parseJson(raw) {
 function clean(v, max) {
   if (v === null || v === undefined) return "";
   return String(v).replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+function googleMessage(body) {
+  try {
+    const e = JSON.parse(body).error;
+    return clean(e && (e.message || e.status), 220);
+  } catch {
+    return clean(body, 220);
+  }
 }
 
 function list(value, fallback) {

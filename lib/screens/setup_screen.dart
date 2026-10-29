@@ -228,7 +228,24 @@ class _SetupScreenState extends State<SetupScreen> {
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: AnimatedOpacity(
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!ready)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(color: AppColors.navy, borderRadius: BorderRadius.circular(14)),
+              child: Text(
+                kind == null
+                    ? 'Choisis d\'abord ton héros ou ton héroïne 👆'
+                    : (kind == 'animal' || kind == 'creature') && species.isEmpty
+                        ? 'Choisis lequel 👆'
+                        : 'Choisis ou invente un nom 👆',
+                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+              ),
+            ),
+          AnimatedOpacity(
         duration: const Duration(milliseconds: 250),
         opacity: ready ? 1 : 0.45,
         child: FilledButton(
@@ -240,6 +257,8 @@ class _SetupScreenState extends State<SetupScreen> {
           ),
           child: const Text('C\'est parti ! 🚀'),
         ),
+      ),
+        ],
       ),
     );
   }

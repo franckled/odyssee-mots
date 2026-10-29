@@ -49,7 +49,9 @@ class StoryApi {
     }
     if (res.statusCode != 200) {
       if (res.statusCode == 401) throw ApiException("Code d'accès incorrect (espace parents).");
-      throw ApiException((data['error'] ?? 'Erreur ${res.statusCode}').toString());
+      final detail = (data['detail'] ?? '').toString();
+      final msg = (data['error'] ?? 'Erreur ${res.statusCode}').toString();
+      throw ApiException(detail.isNotEmpty && !msg.contains(detail) ? '$msg\n\n(Détail technique : $detail)' : msg);
     }
     return data;
   }
