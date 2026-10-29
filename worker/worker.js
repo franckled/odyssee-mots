@@ -7,7 +7,8 @@
  *
  * Version GRATUITE (par défaut) : tout passe par Workers AI de Cloudflare.
  *   1. Settings → Bindings → Add binding → Workers AI → nom de variable : AI
- *   2. Secret ACCESS_CODE : le code d'accès que tu tapes dans l'app
+ *   2. Secret ACCESS_CODE : ton code administrateur (illimité, pour tes tests)
+ *   3. Liaison KV nommée QUOTA (voir « Accès » plus bas) pour les familles
  *   Offre gratuite : 10 000 « neurones » par jour (environ 6 à 8 histoires
  *   illustrées par jour), remise à zéro chaque nuit à 1 h (heure de Paris).
  *
@@ -163,27 +164,38 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/" || url.pathname === "/health") {
-      return json({ ok: true, app: "Odyssée Mots" }, 200, cors);
+      return json({ ok: true, app: "Odyssée Mots", quotas: !!env.QUOTA }, 200, cors);
     }
     if (request.method !== "POST") {
       return json({ error: "Méthode non autorisée" }, 405, cors);
     }
-    if (!env.ACCESS_CODE || request.headers.get("X-Access-Code") !== env.ACCESS_CODE) {
-      return json({ error: "Code d'accès incorrect" }, 401, cors);
-    }
-    if (textProvider(env) === "none") {
-      return json({ error: "Serveur incomplet : ajoute la liaison Workers AI nommée AI (Settings → Bindings)." }, 500, cors);
-    }
-
-    let body;
-    try {
-      body = await request.json();
-    } catch {
-      return json({ error: "Requête illisible" }, 400, cors);
-    }
 
     try {
-      if (url.pathname === "/start") return json(await startStory(body, env), 200, cors);
+      if (url.pathname === "/webhook/revenuecat") return json(await revenueCatWebhook(request, env), 200, cors);
+      if (url.pathname === "/register") return json(await register(request, env), 200, cors);
+
+      const who = await authenticate(request, env);
+      if (textProvider(env) === "none") {
+        throw publicError(500, "Serveur incomplet : ajoute la liaison Workers AI nommée AI (Settings → Bindings).");
+      }
+
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        throw publicError(400, "Requête illisible");
+      }
+
+      if (url.pathname === "/status") return json(await quotaStatus(who, env), 200, cors);
+
+      if (url.pathname === "/start") {
+        await checkStoryQuota(who, env);
+        const story = await startStory(body, env);
+        await countStory(who, env);
+        return json(story, 200, cors);
+      }
+
+      await checkOperationQuota(who, env);
       if (url.pathname === "/next") return json(await nextPage(body, env), 200, cors);
       if (url.pathname === "/image") return await drawImage(body, env, cors);
       if (url.pathname === "/check-context") {
@@ -192,10 +204,166 @@ export default {
       return json({ error: "Adresse inconnue" }, 404, cors);
     } catch (err) {
       const status = err.status || 500;
-      return json({ error: err.publicMessage || "Le conteur s'est emmêlé les pinceaux. Réessaie !", detail: String(err.message || err) }, status, cors);
+      return json(
+        {
+          error: err.publicMessage || "Le conteur s'est emmêlé les pinceaux. Réessaie !",
+          code: err.code || null,
+          detail: String(err.message || err),
+        },
+        status,
+        cors
+      );
     }
   },
 };
+
+/* ------------------------------------------------------------------ */
+/* Accès : un jeton par installation, quotas, abonnement               */
+/* ------------------------------------------------------------------ */
+/*
+ * Liaison KV à créer : Storage & databases → Workers KV → Create (nom : odyssee-quotas),
+ * puis Worker → Settings → Bindings → Add → KV namespace → nom de variable : QUOTA.
+ *
+ * Variables facultatives (texte) :
+ *   FREE_STORIES_PER_DAY     (2 par défaut)   histoires gratuites par appareil et par jour
+ *   PREMIUM_STORIES_PER_DAY  (10 par défaut)  usage raisonnable pour les abonnés
+ *   GLOBAL_STORIES_PER_DAY   (100 par défaut) plafond total, garde-fou des dépenses
+ * Secrets facultatifs :
+ *   TOKEN_SECRET                 clé de signature des jetons (sinon ACCESS_CODE)
+ *   REVENUECAT_WEBHOOK_SECRET    pour activer les abonnements achetés dans l'app
+ *
+ * ACCESS_CODE reste le code « administrateur » : aucun quota.
+ * Le serveur ne connaît qu'un identifiant aléatoire par appareil, jamais l'identité de la famille.
+ */
+
+function today() {
+  return new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris" }).format(new Date());
+}
+
+function intVar(v, d) {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n >= 0 ? n : d;
+}
+
+function tokenSecret(env) {
+  const s = env.TOKEN_SECRET || env.ACCESS_CODE;
+  if (!s) throw publicError(500, "Serveur incomplet : secret ACCESS_CODE manquant.");
+  return s;
+}
+
+async function hmac(secret, text) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(text));
+  return btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function register(request, env) {
+  if (!env.QUOTA) throw publicError(503, "Serveur incomplet : liaison KV « QUOTA » manquante.");
+  const ip = request.headers.get("CF-Connecting-IP") || "inconnue";
+  const key = `reg:${ip}:${today()}`;
+  const n = intVar(await env.QUOTA.get(key), 0);
+  if (n >= 10) throw publicError(429, "Trop d'inscriptions depuis ce réseau aujourd'hui. Réessaie demain.");
+  await env.QUOTA.put(key, String(n + 1), { expirationTtl: 172800 });
+  const id = crypto.randomUUID();
+  return { token: `${id}.${await hmac(tokenSecret(env), id)}`, deviceId: id };
+}
+
+async function authenticate(request, env) {
+  const code = request.headers.get("X-Access-Code");
+  if (env.ACCESS_CODE && code && code === env.ACCESS_CODE) return { admin: true };
+  if (code) throw publicError(401, "Code administrateur incorrect.");
+  const m = (request.headers.get("Authorization") || "").match(/^Bearer\s+([\w-]+)\.([\w-]+)$/);
+  if (!m) throw publicError(401, "Accès refusé.", "token");
+  if ((await hmac(tokenSecret(env), m[1])) !== m[2]) throw publicError(401, "Jeton invalide.", "token");
+  if (!env.QUOTA) throw publicError(503, "Serveur incomplet : liaison KV « QUOTA » manquante.");
+  return { admin: false, id: m[1] };
+}
+
+async function premiumUntil(id, env) {
+  const raw = await env.QUOTA.get(`premium:${id}`);
+  const until = raw ? intVar(raw, 0) : 0;
+  return until > Date.now() ? until : 0;
+}
+
+async function limits(who, env) {
+  const until = await premiumUntil(who.id, env);
+  const limit = until ? intVar(env.PREMIUM_STORIES_PER_DAY, 10) : intVar(env.FREE_STORIES_PER_DAY, 2);
+  const used = intVar(await env.QUOTA.get(`s:${who.id}:${today()}`), 0);
+  return { until, limit, used };
+}
+
+async function quotaStatus(who, env) {
+  if (who.admin) return { admin: true, premium: true, used: 0, limit: null };
+  const { until, limit, used } = await limits(who, env);
+  return { admin: false, premium: !!until, premiumUntil: until || null, used, limit };
+}
+
+async function checkStoryQuota(who, env) {
+  if (who.admin) return;
+  const { until, limit, used } = await limits(who, env);
+  if (used >= limit) {
+    throw publicError(
+      402,
+      until
+        ? `Tu as déjà lu ${limit} histoires aujourd'hui, bravo ! Reviens demain pour de nouvelles aventures.`
+        : `Tu as lu tes ${limit} histoires du jour, bravo ! Reviens demain, ou demande à un parent pour en lire davantage.`,
+      until ? "quota_premium" : "quota"
+    );
+  }
+  if (env.QUOTA) {
+    const global = intVar(await env.QUOTA.get(`g:${today()}`), 0);
+    if (global >= intVar(env.GLOBAL_STORIES_PER_DAY, 100)) {
+      throw publicError(503, "Le conteur a raconté beaucoup d'histoires aujourd'hui et se repose. Reviens demain !", "global");
+    }
+  }
+}
+
+async function countStory(who, env) {
+  if (who.admin || !env.QUOTA) return;
+  const day = today();
+  const k = `s:${who.id}:${day}`;
+  await env.QUOTA.put(k, String(intVar(await env.QUOTA.get(k), 0) + 1), { expirationTtl: 172800 });
+  const g = `g:${day}`;
+  await env.QUOTA.put(g, String(intVar(await env.QUOTA.get(g), 0) + 1), { expirationTtl: 172800 });
+}
+
+/** Pages et images : limite large, seulement contre les abus. */
+async function checkOperationQuota(who, env) {
+  if (who.admin) return;
+  const { limit } = await limits(who, env);
+  const k = `o:${who.id}:${today()}`;
+  const n = intVar(await env.QUOTA.get(k), 0);
+  if (n >= Math.max(limit, 1) * 40) throw publicError(429, "Doucement ! Reviens demain pour la suite.", "ops");
+  await env.QUOTA.put(k, String(n + 1), { expirationTtl: 172800 });
+}
+
+/**
+ * Abonnements : RevenueCat (achats App Store / Google Play) prévient le serveur.
+ * Dans l'app, l'identifiant RevenueCat de l'utilisateur = identifiant de l'appareil.
+ */
+async function revenueCatWebhook(request, env) {
+  if (!env.REVENUECAT_WEBHOOK_SECRET || request.headers.get("Authorization") !== env.REVENUECAT_WEBHOOK_SECRET) {
+    throw publicError(401, "Non autorisé");
+  }
+  if (!env.QUOTA) throw publicError(503, "KV manquant");
+  const { event } = await request.json();
+  if (!event || !event.app_user_id) return { ok: true, ignored: true };
+  const id = String(event.app_user_id);
+  const active = ["INITIAL_PURCHASE", "RENEWAL", "PRODUCT_CHANGE", "UNCANCELLATION", "NON_RENEWING_PURCHASE"];
+  if (active.includes(event.type)) {
+    const until = event.expiration_at_ms || Date.now() + 31 * 24 * 3600 * 1000;
+    await env.QUOTA.put(`premium:${id}`, String(until));
+  } else if (event.type === "EXPIRATION") {
+    await env.QUOTA.delete(`premium:${id}`);
+  }
+  return { ok: true };
+}
 
 /* ------------------------------------------------------------------ */
 /* Démarrer une histoire                                               */
@@ -762,10 +930,11 @@ function geminiUrl(model) {
   return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 }
 
-function publicError(status, message) {
+function publicError(status, message, code) {
   const e = new Error(message);
   e.status = status;
   e.publicMessage = message;
+  e.code = code || null;
   return e;
 }
 
@@ -773,7 +942,7 @@ function corsHeaders(env) {
   return {
     "Access-Control-Allow-Origin": env.ALLOWED_ORIGIN || "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, X-Access-Code",
+    "Access-Control-Allow-Headers": "Content-Type, X-Access-Code, Authorization",
     "Access-Control-Max-Age": "86400",
   };
 }

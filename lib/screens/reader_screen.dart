@@ -7,6 +7,7 @@ import '../models.dart';
 import '../storage.dart';
 import '../theme.dart';
 import '../widgets/parent_gate.dart';
+import '../widgets/quota_view.dart';
 
 class ReaderScreen extends StatefulWidget {
   final Story? existing;
@@ -41,6 +42,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Story? story;
   int index = 0;
   String? error;
+  bool quotaReached = false;
   bool waitingNext = false;
   Future<void>? _prefetch;
   Future<void> _imageChain = Future.value();
@@ -86,7 +88,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
       await s.saveStory(st);
       _maybePrefetch();
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) {
+        setState(() {
+          error = e.toString();
+          quotaReached = e is ApiException && e.isQuota;
+        });
+      }
     }
   }
 
@@ -292,7 +299,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
     if (st == null) {
       return Scaffold(
         appBar: AppBar(),
-        body: error == null ? const _Preparing() : _ErrorView(message: error!, onRetry: _begin),
+        body: error == null
+            ? const _Preparing()
+            : quotaReached
+                ? QuotaReachedView(message: error!)
+                : _ErrorView(message: error!, onRetry: _begin),
       );
     }
 

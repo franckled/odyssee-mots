@@ -10,9 +10,24 @@ import 'storage.dart';
 
 class ApiException implements Exception {
   final String message;
-  ApiException(this.message);
+  final String? code;
+  ApiException(this.message, [this.code]);
+
+  /// Quota du jour atteint (gratuit ou abonné).
+  bool get isQuota => code == 'quota' || code == 'quota_premium' || code == 'global';
+
   @override
   String toString() => message;
+}
+
+class QuotaStatus {
+  final bool admin;
+  final bool premium;
+  final int used;
+  final int? limit;
+  const QuotaStatus({required this.admin, required this.premium, required this.used, this.limit});
+
+  int? get remaining => limit == null ? null : (limit! - used).clamp(0, limit!);
 }
 
 /// Dialogue avec le serveur Cloudflare (qui, lui, parle aux IA).
@@ -25,17 +40,51 @@ class StoryApi {
     return Uri.parse('$base$path');
   }
 
+  /// Chaque installation reçoit automatiquement un jeton anonyme :
+  /// la famille n'a rien à saisir.
+  Future<void> _ensureToken() async {
+    if (_s.accessCode.isNotEmpty || _s.deviceToken.isNotEmpty) return;
+    final data = await _send('/register', const {}, const Duration(seconds: 20), auth: false);
+    _s.deviceToken = (data['token'] ?? '').toString();
+  }
+
+  Map<String, String> _headers() {
+    final h = {'Content-Type': 'application/json'};
+    if (_s.accessCode.isNotEmpty) {
+      h['X-Access-Code'] = _s.accessCode;
+    } else if (_s.deviceToken.isNotEmpty) {
+      h['Authorization'] = 'Bearer ${_s.deviceToken}';
+    }
+    return h;
+  }
+
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body,
       {Duration timeout = const Duration(seconds: 150)}) async {
     if (!_s.isConfigured) {
       throw ApiException("L'application n'est pas encore réglée. Demande à un parent d'ouvrir l'espace parents.");
     }
+    await _ensureToken();
+    try {
+      return await _send(path, body, timeout);
+    } on ApiException catch (e) {
+      // Jeton perdu ou refusé : on en redemande un, une seule fois.
+      if (e.code == 'token' && _s.accessCode.isEmpty) {
+        _s.deviceToken = '';
+        await _ensureToken();
+        return _send(path, body, timeout);
+      }
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> _send(String path, Map<String, dynamic> body, Duration timeout,
+      {bool auth = true}) async {
     http.Response res;
     try {
       res = await http
           .post(
             _uri(path),
-            headers: {'Content-Type': 'application/json', 'X-Access-Code': _s.accessCode},
+            headers: auth ? _headers() : const {'Content-Type': 'application/json'},
             body: jsonEncode(body),
           )
           .timeout(timeout);
@@ -51,17 +100,28 @@ class StoryApi {
       throw ApiException('Réponse inattendue du conteur (${res.statusCode}).');
     }
     if (res.statusCode != 200) {
-      if (res.statusCode == 401) throw ApiException("Code d'accès incorrect (espace parents).");
-      final detail = (data['detail'] ?? '').toString();
+      final code = data['code'] as String?;
       final msg = (data['error'] ?? 'Erreur ${res.statusCode}').toString();
+      if (code != null || res.statusCode == 401) throw ApiException(msg, code);
+      final detail = (data['detail'] ?? '').toString();
       throw ApiException(detail.isNotEmpty && !msg.contains(detail) ? '$msg\n\n(Détail technique : $detail)' : msg);
     }
     return data;
   }
 
+  Future<QuotaStatus> status() async {
+    final d = await _post('/status', const {}, timeout: const Duration(seconds: 20));
+    return QuotaStatus(
+      admin: d['admin'] == true,
+      premium: d['premium'] == true,
+      used: (d['used'] as num?)?.toInt() ?? 0,
+      limit: (d['limit'] as num?)?.toInt(),
+    );
+  }
+
   /// Vérifie l'adresse du serveur et le code d'accès.
   Future<void> testConnection() async {
-    await _post('/check-context', {'context': ''}, timeout: const Duration(seconds: 20));
+    await status();
   }
 
   Future<Story> start({

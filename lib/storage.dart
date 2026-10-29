@@ -15,6 +15,8 @@ class Storage {
     instance = Storage._(await SharedPreferences.getInstance());
   }
 
+  /// Adresse du serveur intégrée à l'application (réglée au moment de la
+  /// compilation par GitHub Actions, variable WORKER_URL du dépôt).
   static const _defaultWorkerUrl = String.fromEnvironment('WORKER_URL');
   static const maxStories = 20;
 
@@ -29,7 +31,17 @@ class Storage {
   String get accessCode => _p.getString('accessCode') ?? '';
   set accessCode(String v) => _p.setString('accessCode', v.trim());
 
-  bool get isConfigured => workerUrl.isNotEmpty && accessCode.isNotEmpty;
+  bool get isConfigured => workerUrl.isNotEmpty;
+
+  /// Jeton anonyme propre à cet appareil (donné par le serveur).
+  String get deviceToken => _p.getString('deviceToken') ?? '';
+  set deviceToken(String v) => _p.setString('deviceToken', v);
+
+  /// Identifiant anonyme de l'appareil (sert aussi pour l'abonnement).
+  String get deviceId => deviceToken.contains('.') ? deviceToken.split('.').first : '';
+
+  bool get consentGiven => _p.getBool('consent') ?? false;
+  set consentGiven(bool v) => _p.setBool('consent', v);
 
   String get lastAge => _p.getString('lastAge') ?? '7-9';
   set lastAge(String v) => _p.setString('lastAge', v);
@@ -105,10 +117,14 @@ class Storage {
   }
 
   Future<void> clearAll() async {
-    final url = _p.getString('workerUrl');
-    final code = _p.getString('accessCode');
+    final keep = {
+      for (final k in ['workerUrl', 'accessCode', 'deviceToken']) k: _p.getString(k),
+    };
+    final consent = consentGiven;
     await _p.clear();
-    if (url != null) await _p.setString('workerUrl', url);
-    if (code != null) await _p.setString('accessCode', code);
+    for (final e in keep.entries) {
+      if (e.value != null) await _p.setString(e.key, e.value!);
+    }
+    consentGiven = consent;
   }
 }

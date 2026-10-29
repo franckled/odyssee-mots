@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../api.dart';
 import '../storage.dart';
 import '../theme.dart';
 import '../widgets/parent_gate.dart';
+import '../widgets/quota_view.dart';
 import 'library_screen.dart';
 import 'parent_screen.dart';
 import 'setup_screen.dart';
@@ -17,10 +19,28 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   Storage get s => Storage.instance;
+  QuotaStatus? quota;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadQuota();
+  }
+
+  Future<void> _loadQuota() async {
+    if (!s.isConfigured || !s.consentGiven) return;
+    try {
+      final q = await StoryApi().status();
+      if (mounted) setState(() => quota = q);
+    } catch (_) {
+      // hors ligne : on affichera le quota plus tard
+    }
+  }
 
   Future<void> _go(Widget screen) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
     if (mounted) setState(() {});
+    _loadQuota();
   }
 
   Future<void> _openParents() async {
@@ -44,6 +64,28 @@ class _HomeScreenState extends State<HomeScreen> {
       if (ok == true) await _openParents();
       return;
     }
+    if (!s.consentGiven) {
+      if (!await askParentGate(context)) return;
+      if (!mounted || !await askParentConsent(context)) return;
+      s.consentGiven = true;
+      await _loadQuota();
+      if (!mounted) return;
+    }
+    final q = quota;
+    if (q != null && !q.admin && q.remaining == 0) {
+      await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(),
+          body: QuotaReachedView(
+            message: q.premium
+                ? 'Tu as déjà lu ${q.limit} histoires aujourd\'hui, bravo ! Reviens demain.'
+                : 'Tu as lu tes ${q.limit} histoires du jour, bravo ! Reviens demain, ou demande à un parent pour en lire davantage.',
+          ),
+        ),
+      ));
+      _loadQuota();
+      return;
+    }
     await _go(const SetupScreen());
   }
 
@@ -64,6 +106,17 @@ class _HomeScreenState extends State<HomeScreen> {
                       Image.asset('assets/images/accueil.jpg', fit: BoxFit.contain),
                       const SizedBox(height: 20),
                       _StarsBadge(stars: s.stars),
+                      if (quota != null && !quota!.admin) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          quota!.premium
+                              ? '🌟 Abonnement actif — ${quota!.remaining} histoires possibles aujourd\'hui'
+                              : quota!.remaining == 0
+                                  ? '🌙 Histoires du jour terminées — à demain !'
+                                  : '📖 ${quota!.remaining} histoire${quota!.remaining == 1 ? '' : 's'} gratuite${quota!.remaining == 1 ? '' : 's'} aujourd\'hui',
+                          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+                        ),
+                      ],
                       const SizedBox(height: 20),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -104,7 +157,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       const Padding(
                         padding: EdgeInsets.fromLTRB(24, 4, 24, 20),
                         child: Text(
-                          'Histoires et illustrations créées avec une intelligence artificielle.\nVersion 0.1.4',
+                          'Histoires et illustrations créées avec une intelligence artificielle.\nVersion 0.2.0',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.white54, fontSize: 13),
                         ),
