@@ -17,7 +17,7 @@
  *   ANTHROPIC_API_KEY                        → textes écrits par Claude
  *
  * Variables facultatives : ALLOWED_ORIGIN (ex. https://franckled.github.io),
- *   CF_TEXT_MODEL, CF_IMAGE_MODEL, GEMINI_TEXT_MODELS, GEMINI_IMAGE_MODELS, CLAUDE_MODEL
+ *   CF_TEXT_MODELS, CF_IMAGE_MODEL, GEMINI_TEXT_MODELS, GEMINI_IMAGE_MODELS, CLAUDE_MODEL
  *
  * Aucune histoire, aucun prénom, aucune image n'est conservé ici :
  * tout repart vers l'application et disparaît du serveur.
@@ -27,7 +27,9 @@ const DEFAULT_GEMINI_TEXT_MODELS = "gemini-3-flash-preview,gemini-2.5-flash,gemi
 const DEFAULT_GEMINI_IMAGE_MODELS =
   "gemini-3.1-flash-image,gemini-3.1-flash-image-preview,gemini-2.5-flash-image";
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-5-5";
-const DEFAULT_CF_TEXT_MODEL = "@cf/google/gemma-4-26b-a4b-it";
+// Mistral (entreprise française) : bon français, rapide, peu coûteux en neurones.
+const DEFAULT_CF_TEXT_MODELS =
+  "@cf/mistralai/mistral-small-3.1-24b-instruct,@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/google/gemma-3-12b-it";
 const DEFAULT_CF_IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell";
 
 function textProvider(env) {
@@ -347,6 +349,7 @@ async function writeSafely(prompt, cfg, env) {
     });
     const data = parseJson(raw);
     if (!data) {
+      console.log("réponse non JSON : " + String(raw).slice(0, 300));
       extra = "\n\nATTENTION : ta réponse précédente n'était pas du JSON valide. Réponds uniquement avec le JSON demandé.";
       continue;
     }
@@ -356,6 +359,7 @@ async function writeSafely(prompt, cfg, env) {
       .join("\n");
     const verdict = await reviewForChildren(textToCheck, cfg, env);
     if (verdict.ok) return data;
+    console.log("page refusée par la relecture : " + verdict.raison);
     extra = `\n\nATTENTION : une version précédente a été refusée par le comité de protection de l'enfance pour la raison suivante : « ${verdict.raison} ». Écris une version entièrement adaptée.`;
   }
   throw publicError(502, "Le conteur n'a pas trouvé de suite assez douce. Réessaie !");
@@ -460,7 +464,9 @@ async function drawImage(body, env, cors) {
     const prompt = `${IMAGE_STYLE}\n\nMain character, identical on every page: ${hero}\n\nScene: ${scene}`.slice(0, 2000);
     let out;
     try {
+      const t0 = Date.now();
       out = await env.AI.run(env.CF_IMAGE_MODEL || DEFAULT_CF_IMAGE_MODEL, { prompt, steps: 6 });
+      console.log(`image en ${Date.now() - t0} ms`);
     } catch (e) {
       throw quotaOrError(e, "Illustration impossible");
     }
@@ -520,24 +526,37 @@ async function callText(env, { system, user, temperature, maxTokens, fast }) {
   const provider = textProvider(env);
 
   if (provider === "cloudflare") {
-    let out;
-    try {
-      out = await env.AI.run(env.CF_TEXT_MODEL || DEFAULT_CF_TEXT_MODEL, {
+    const models = list(env.CF_TEXT_MODELS, DEFAULT_CF_TEXT_MODELS);
+    const errors = [];
+    for (const model of models) {
+      const t0 = Date.now();
+      const input = {
         messages: [
           { role: "system", content: system },
           { role: "user", content: user },
         ],
-        max_completion_tokens: maxTokens,
         temperature,
-      });
-    } catch (e) {
-      throw quotaOrError(e, "Le conteur ne répond pas");
+      };
+      if (model.includes("gemma-4")) input.max_completion_tokens = maxTokens;
+      else input.max_tokens = maxTokens;
+      let out;
+      try {
+        out = await env.AI.run(model, input);
+      } catch (e) {
+        const m = String((e && e.message) || e);
+        console.log(`texte ${model} échec en ${Date.now() - t0} ms : ${m}`);
+        if (/neuron|4006|daily free allocation/i.test(m)) throw quotaOrError(e, "");
+        errors.push(`${model}: ${clean(m, 150)}`);
+        continue;
+      }
+      console.log(`texte ${model} ${fast ? "(relecture)" : "(écriture)"} en ${Date.now() - t0} ms`);
+      if (!out) return "";
+      if (typeof out.response === "string") return out.response;
+      if (out.response && typeof out.response === "object") return JSON.stringify(out.response);
+      const msg = out.choices && out.choices[0] && out.choices[0].message;
+      return (msg && msg.content) || "";
     }
-    if (!out) return "";
-    if (typeof out.response === "string") return out.response;
-    if (out.response && typeof out.response === "object") return JSON.stringify(out.response);
-    const msg = out.choices && out.choices[0] && out.choices[0].message;
-    return (msg && msg.content) || "";
+    throw publicError(502, "Le conteur ne répond pas : " + errors.join(" | "));
   }
 
   if (provider === "claude") {

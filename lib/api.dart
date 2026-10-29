@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -25,7 +26,7 @@ class StoryApi {
   }
 
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body,
-      {Duration timeout = const Duration(seconds: 90)}) async {
+      {Duration timeout = const Duration(seconds: 150)}) async {
     if (!_s.isConfigured) {
       throw ApiException("L'application n'est pas encore réglée. Demande à un parent d'ouvrir l'espace parents.");
     }
@@ -38,8 +39,10 @@ class StoryApi {
             body: jsonEncode(body),
           )
           .timeout(timeout);
-    } catch (_) {
-      throw ApiException('Impossible de joindre le conteur. Vérifie la connexion internet.');
+    } on TimeoutException {
+      throw ApiException('Le conteur met trop de temps à répondre. Réessaie dans un instant.');
+    } catch (e) {
+      throw ApiException('Impossible de joindre le conteur. Vérifie la connexion internet.\n\n(Détail technique : $e)');
     }
     Map<String, dynamic> data;
     try {
