@@ -34,20 +34,17 @@ worker/         serveur Cloudflare (garde les clés d'API secrètes)
 
 ## Mise en route
 
-### 1. Clé Google Gemini
-1. Va sur **aistudio.google.com**, puis « Get API key » et « Create API key ».
-2. Active la facturation : la génération d'images est payante.
-3. Fixe un **plafond de dépenses** dans Google Cloud (Billing, puis Budgets).
+### 1. Serveur Cloudflare (version gratuite)
+1. Dans **Workers & Pages**, crée un Worker nommé `odyssee-mots`.
+2. Clique sur **Edit code**, colle le contenu de `worker/worker.js`, puis clique sur **Deploy**.
+3. Va dans **Settings → Bindings → Add binding → Workers AI**. Nom de variable : `AI`.
+4. Va dans **Settings → Variables and Secrets**. Ajoute le secret `ACCESS_CODE` : un code inventé.
 
-### 2. Serveur Cloudflare
-1. Dans le tableau de bord Cloudflare, ouvre **Workers & Pages**, puis **Create**, puis **Create Worker**. Nomme-le `odyssee-mots` et clique sur **Deploy**.
-2. Clique sur **Edit code**. Efface tout, colle le contenu de `worker/worker.js`, puis clique sur **Deploy**.
-3. Va dans **Settings**, puis **Variables and Secrets**. Ajoute deux secrets (type *Secret*) :
-   - `GEMINI_API_KEY` : ta clé Google ;
-   - `ACCESS_CODE` : un code d'accès inventé, assez long.
-4. Note l'adresse du Worker (`https://odyssee-mots.<ton-nom>.workers.dev`).
+Les textes sont écrits par Gemma 4 et les illustrations dessinées par FLUX.1 schnell, tous deux via Workers AI. L'offre gratuite donne 10 000 « neurones » par jour, soit environ 6 à 8 histoires illustrées. La réserve se recharge chaque nuit.
 
-Option : ajoute `ANTHROPIC_API_KEY` pour que Claude écrive les textes, Gemini gardant les illustrations.
+### 2. Options payantes (facultatives)
+- Illustrations Gemini, où le héros reste plus constant grâce à l'image modèle : secrets `GEMINI_API_KEY` et `IMAGE_PROVIDER` = `gemini`.
+- Textes par Claude : secret `ANTHROPIC_API_KEY`.
 
 ### 3. Application
 1. Sur GitHub, va dans **Settings**, puis **Pages**. Dans Source, choisis **GitHub Actions**.
