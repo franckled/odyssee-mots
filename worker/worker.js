@@ -1,7 +1,7 @@
 /**
  * Odyssée Mots — serveur intermédiaire (Cloudflare Worker)
  *
- * Rôle : garder les clés d'API secrètes, écrire les pages de l'histoire,
+ * Rôle : garder les clés d'API secrètes, écrire les pages de l'histoire, 
  * vérifier qu'elles respectent la protection de l'enfance, et dessiner
  * les illustrations.
  *
