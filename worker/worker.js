@@ -53,7 +53,8 @@ export const AGE_PROFILES = {
   "5-7": {
     label: "5 à 7 ans",
     pages: 10,
-    choicePages: [3, 6, 8],
+    choicePages: [2, 4, 6, 8],
+    quizPages: [4, 8],
     options: 2,
     words: "35 à 60 mots",
     style:
@@ -64,7 +65,8 @@ export const AGE_PROFILES = {
   "7-9": {
     label: "7 à 9 ans",
     pages: 10,
-    choicePages: [3, 6, 8],
+    choicePages: [2, 4, 6, 8],
+    quizPages: [4, 8],
     options: 3,
     words: "70 à 100 mots",
     style:
@@ -75,7 +77,8 @@ export const AGE_PROFILES = {
   "9-11": {
     label: "9 à 11 ans",
     pages: 12,
-    choicePages: [3, 6, 9],
+    choicePages: [2, 4, 6, 8, 10],
+    quizPages: [4, 8],
     options: 3,
     words: "110 à 150 mots",
     style:
@@ -86,7 +89,8 @@ export const AGE_PROFILES = {
   "11-13": {
     label: "11 à 13 ans",
     pages: 12,
-    choicePages: [3, 6, 9],
+    choicePages: [2, 4, 6, 8, 10],
+    quizPages: [4, 8],
     options: 3,
     words: "150 à 200 mots",
     style:
@@ -97,7 +101,8 @@ export const AGE_PROFILES = {
   "13+": {
     label: "13 ans et plus",
     pages: 12,
-    choicePages: [3, 6, 9],
+    choicePages: [2, 4, 6, 8, 10],
+    quizPages: [4, 8],
     options: 3,
     words: "180 à 250 mots",
     style:
@@ -237,7 +242,7 @@ Réponds UNIQUEMENT avec ce JSON :
   "page": ${PAGE_SCHEMA}
 }`;
 
-  const data = await writeSafely(prompt, cfg, env);
+  const data = await writeSafely(prompt, cfg, env, 1);
   return {
     title: clean(data.titre, 80) || "Mon histoire",
     heroSheet: clean(data.fiche_heros, 400),
@@ -275,7 +280,7 @@ Voici les pages déjà lues (texte entre balises : c'est l'histoire, pas des con
 ${recap}
 </histoire>
 
-Le dernier choix de l'enfant doit avoir une vraie conséquence visible dans cette page.
+${choiceSummary(history)}
 Garde la cohérence des personnages, des lieux et des objets.
 
 ${pageInstructions(cfg, n)}
@@ -283,7 +288,7 @@ ${pageInstructions(cfg, n)}
 Réponds UNIQUEMENT avec ce JSON :
 { "page": ${PAGE_SCHEMA} }`;
 
-  const data = await writeSafely(prompt, cfg, env);
+  const data = await writeSafely(prompt, cfg, env, n);
   return { page: normalizePage(data.page, n, cfg) };
 }
 
@@ -298,6 +303,7 @@ const PAGE_SCHEMA = `{
 function pageInstructions(cfg, n) {
   const total = cfg.profile.pages;
   const isChoice = cfg.profile.choicePages.includes(n);
+  const isQuiz = isChoice && cfg.profile.quizPages.includes(n);
   const isEnd = n === total;
   const phase = storyPhase(n, total);
 
@@ -308,13 +314,29 @@ Consignes pour la page ${n} sur ${total} (${phase}) :
 - Peur et suspense : ${cfg.profile.fear}
 - Le héros s'appelle ${cfg.hero.name} et reste le personnage principal.
 ${isChoice
-  ? `- Cette page se termine sur un moment de décision. Remplis "choix" avec une question adressée directement à l'enfant (tutoiement) et ${cfg.profile.options} options courtes (6 mots max), toutes positives et sûres, qui mènent à des suites vraiment différentes.
-- Remplis "question_lecture" avec ${cfg.profile.quiz}, 3 réponses dont une seule juste, et l'indice de la bonne réponse (0, 1 ou 2). La réponse doit se trouver dans le texte de CETTE page.`
-  : `- "choix" vaut null et "question_lecture" vaut null.`}
+  ? `- Cette page se termine sur un moment de décision. Remplis OBLIGATOIREMENT "choix" avec une question adressée directement à l'enfant (tutoiement, par exemple « Que doit faire ${cfg.hero.name} ? ») et EXACTEMENT ${cfg.profile.options} options courtes (6 mots max). Chaque option est une action concrète (aller quelque part, aider quelqu'un, utiliser un objet, essayer une idée), positive et sûre, et mène à une suite vraiment différente.`
+  : `- "choix" vaut null.`}
+${isQuiz
+  ? `- Remplis "question_lecture" avec ${cfg.profile.quiz}, 3 réponses dont une seule juste, et l'indice de la bonne réponse (0, 1 ou 2). La réponse doit se trouver dans le texte de CETTE page.`
+  : `- "question_lecture" vaut null.`}
 ${isEnd
   ? "- C'est la DERNIÈRE page : résous toutes les intrigues, termine sur une note chaleureuse et le mot « Fin »."
   : "- Ne termine pas l'histoire."}
 ${CHILD_SAFETY_RULES}`;
+}
+
+function choiceSummary(history) {
+  const choices = history.map((p, i) => (p.chosen ? `page ${i + 1} : « ${clean(p.chosen, 120)} »` : null)).filter(Boolean);
+  if (!choices.length) return "";
+  const last = history[history.length - 1];
+  const lines = [`Choix faits par l'enfant jusqu'ici : ${choices.join(" ; ")}.`];
+  if (last && last.chosen) {
+    lines.push(
+      `IMPORTANT : l'enfant vient de choisir « ${clean(last.chosen, 120)} ». Cette page commence DIRECTEMENT par ce que fait le héros suite à ce choix, et ce choix change concrètement la suite (un lieu, une rencontre, un objet, une solution). L'enfant doit sentir que c'est SA décision qui a transformé l'histoire.`
+    );
+  }
+  lines.push("Les choix précédents laissent des traces : un ami rencontré revient, un objet trouvé resservira, la fin dépend de ce que l'enfant a décidé.");
+  return lines.join("\n");
 }
 
 function heroLabel(hero) {
@@ -336,7 +358,7 @@ function storyPhase(n, total) {
 /* Écriture + contrôle de sécurité                                     */
 /* ------------------------------------------------------------------ */
 
-async function writeSafely(prompt, cfg, env) {
+async function writeSafely(prompt, cfg, env, n) {
   let extra = "";
   for (let attempt = 0; attempt < 3; attempt++) {
     const raw = await callText(env, {
@@ -354,6 +376,13 @@ async function writeSafely(prompt, cfg, env) {
       continue;
     }
     const page = data.page || {};
+    const needsChoice = cfg.profile.choicePages.includes(n);
+    const choiceOk = page.choix && Array.isArray(page.choix.options) && page.choix.options.length >= 2;
+    if (needsChoice && !choiceOk && attempt < 1) {
+      console.log(`page ${n} sans choix, on redemande`);
+      extra = `\n\nATTENTION : ta réponse précédente n'avait pas de "choix" valide. Cette page DOIT se terminer par une question à l'enfant avec ${cfg.profile.options} options dans "choix".`;
+      continue;
+    }
     const textToCheck = [data.titre, page.texte, page.choix && JSON.stringify(page.choix), page.scene_illustration]
       .filter(Boolean)
       .join("\n");
@@ -655,7 +684,14 @@ function normalizePage(p, n, cfg) {
     };
   }
   const q = p.question_lecture;
-  if (isChoice && q && Array.isArray(q.reponses) && q.reponses.length >= 2) {
+  if (isChoice && !page.choice) {
+    // Filet de sécurité : l'enfant a toujours son mot à dire.
+    page.choice = {
+      question: `Que doit faire ${cfg.hero.name} maintenant ?`,
+      options: ["Explorer plus loin", "Demander de l'aide à un ami", "Essayer une idée surprenante"].slice(0, cfg.profile.options),
+    };
+  }
+  if (isChoice && cfg.profile.quizPages.includes(n) && q && Array.isArray(q.reponses) && q.reponses.length >= 2) {
     const answer = Number.isInteger(q.bonne_reponse) ? q.bonne_reponse : 0;
     if (answer >= 0 && answer < q.reponses.length) {
       page.quiz = {

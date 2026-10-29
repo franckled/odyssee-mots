@@ -324,6 +324,19 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     if (p.reported)
                       const _ReportedPage()
                     else ...[
+                      if (index > 0 && st.pages[index - 1].chosen != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: AppColors.coral.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text('🧭 Tu as choisi : ${st.pages[index - 1].chosen}',
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.coral)),
+                          ),
+                        ),
                       _Illustration(page: p, universe: st.universe),
                       const SizedBox(height: 20),
                       SelectableText(p.text, style: storyTextStyle(age.fontSize)),

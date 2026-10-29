@@ -7,7 +7,7 @@ Un livre illustré interactif pour les enfants de 5 à 13 ans et plus. L'enfant 
 ## Ce que fait le prototype
 
 - **Questions à l'enfant** avant l'histoire : âge, héros (fille, garçon, animal, robot, créature magique), nom imaginaire, couleur préférée, univers.
-- **Histoire de 10 pages** pour les 5-9 ans et **de 12 pages** à partir de 9 ans, avec 3 moments de choix.
+- **Histoire de 10 pages** pour les 5-9 ans et **de 12 pages** à partir de 9 ans, avec un choix toutes les deux pages.
 - **Illustrations** à chaque page, dans un style gai et frais. La première image sert de modèle aux suivantes pour garder le même héros.
 - **Promotion de la lecture** :
   - il faut lire la page avant de continuer ;
