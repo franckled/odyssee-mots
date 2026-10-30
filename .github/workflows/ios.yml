@@ -130,7 +130,13 @@ jobs:
               exit 1; }
           IPA=$(ls $RUNNER_TEMP/export/*.ipa)
           mkdir -p $RUNNER_TEMP/check && cd $RUNNER_TEMP/check && unzip -q "$IPA"
-          codesign -dvv Payload/*.app 2>&1 | grep -E "Authority" | head -2 | while read -r l; do echo "::notice::IPA : $l"; done
+          codesign -dvv Payload/*.app 2>&1 | grep -E "Authority|Timestamp|Signed Time|Identifier=" | head -6 | while read -r l; do echo "::notice::IPA : $l"; done
+          for f in Payload/Runner.app Payload/Runner.app/Frameworks/*.framework; do
+            codesign --verify --strict --verbose=2 "$f" 2>&1 | tail -2 | while read -r l; do echo "::notice::verify $(basename "$f") : $l"; done
+          done
+          codesign -d -r- Payload/Runner.app 2>&1 | tail -1 | cut -c1-300 | while read -r l; do echo "::notice::req : $l"; done
+          security find-identity -v -p codesigning | head -5 | while read -r l; do echo "::notice::identité : $l"; done
+          xattr -lr Payload | head -5 | while read -r l; do echo "::notice::xattr : $l"; done
           echo "IPA=$IPA" >> $GITHUB_ENV
 
       - name: Envoi vers TestFlight
