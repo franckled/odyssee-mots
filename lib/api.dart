@@ -150,14 +150,22 @@ class StoryApi {
     );
   }
 
-  Future<StoryPage> next(Story story) async {
+  /// [chosenForLast] : prépare à l'avance la suite d'une option du choix en cours.
+  Future<StoryPage> next(Story story, {String? chosenForLast}) async {
+    final pages = [
+      for (var i = 0; i < story.pages.length; i++)
+        {
+          'text': story.pages[i].text,
+          'chosen': i == story.pages.length - 1 && chosenForLast != null ? chosenForLast : story.pages[i].chosen,
+        }
+    ];
     final data = await _post('/next', {
       'age': story.age,
       'hero': story.hero.toJson(),
       'universe': story.universe,
       'title': story.title,
       'parentContext': story.parentContext,
-      'pages': story.pages.map((p) => {'text': p.text, 'chosen': p.chosen}).toList(),
+      'pages': pages,
     });
     return StoryPage.fromJson(Map<String, dynamic>.from(data['page']));
   }

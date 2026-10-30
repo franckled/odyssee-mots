@@ -45,6 +45,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool quotaReached = false;
   bool waitingNext = false;
   Future<void>? _prefetch;
+
+  /// Suites préparées à l'avance pour chaque option du choix en cours :
+  /// pendant que l'enfant lit et réfléchit, le conteur écrit déjà.
+  final Map<String, Future<StoryPage?>> _branches = {};
+  int? _branchesFor;
   Future<void> _imageChain = Future.value();
 
   // Question de lecture de la page en cours
@@ -135,11 +140,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
   /// (sauf si elle dépend d'un choix).
   void _maybePrefetch() {
     final st = story;
-    if (st == null || _prefetch != null) return;
+    if (st == null) return;
     final last = st.pages.last;
     final needsNext = index >= st.pages.length - 1;
-    if (!needsNext || last.isEnd || (last.choice != null && last.chosen == null)) return;
+    if (!needsNext || last.isEnd) return;
+    if (last.choice != null && last.chosen == null) {
+      _prepareBranches(st, last);
+      return;
+    }
+    if (_prefetch != null) return;
     _prefetch = _fetchNext().whenComplete(() => _prefetch = null);
+  }
+
+  void _prepareBranches(Story st, StoryPage choicePage) {
+    if (_branchesFor == choicePage.number) return;
+    _branchesFor = choicePage.number;
+    _branches.clear();
+    for (final option in choicePage.choice!.options) {
+      _branches[option] = api.next(st, chosenForLast: option).then<StoryPage?>((p) => p).catchError((_) => null);
+    }
   }
 
   Future<void> _fetchNext() async {
@@ -148,6 +167,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
       final page = await api.next(st);
       st.pages.add(page);
       _queueImage(page);
+      if (page.choice != null && page.chosen == null) _prepareBranches(st, page);
       await s.saveStory(st);
       if (mounted) setState(() => error = null);
     } catch (e) {
@@ -190,7 +210,16 @@ class _ReaderScreenState extends State<ReaderScreen> {
       waitingNext = true;
     });
     await s.saveStory(story!);
-    await _fetchNext();
+    final prepared = _branches[option];
+    final ready = prepared == null ? null : await prepared;
+    _branches.clear();
+    if (ready != null && story!.pages.length == index + 1) {
+      story!.pages.add(ready);
+      _queueImage(ready);
+      await s.saveStory(story!);
+    } else if (story!.pages.length == index + 1) {
+      await _fetchNext();
+    }
     if (!mounted) return;
     setState(() => waitingNext = false);
     if (story!.pages.length > index + 1) _goTo(index + 1);

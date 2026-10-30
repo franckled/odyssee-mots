@@ -31,6 +31,7 @@ const DEFAULT_CLAUDE_MODEL = "claude-sonnet-5-5";
 // Mistral (entreprise française) : bon français, rapide, peu coûteux en neurones.
 const DEFAULT_CF_TEXT_MODELS =
   "@cf/mistralai/mistral-small-3.1-24b-instruct,@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/google/gemma-3-12b-it";
+const DEFAULT_CF_REVIEW_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 const DEFAULT_CF_IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell";
 
 function textProvider(env) {
@@ -52,6 +53,7 @@ function imageProvider(env) {
 
 export const AGE_PROFILES = {
   "5-7": {
+    maxTokens: 700,
     label: "5 à 7 ans",
     pages: 10,
     choicePages: [2, 4, 6, 8],
@@ -64,6 +66,7 @@ export const AGE_PROFILES = {
     quiz: "une question très simple sur un fait de la page (couleur, objet, personnage)",
   },
   "7-9": {
+    maxTokens: 900,
     label: "7 à 9 ans",
     pages: 10,
     choicePages: [2, 4, 6, 8],
@@ -76,6 +79,7 @@ export const AGE_PROFILES = {
     quiz: "une question simple sur ce qui vient de se passer",
   },
   "9-11": {
+    maxTokens: 1100,
     label: "9 à 11 ans",
     pages: 12,
     choicePages: [2, 4, 6, 8, 10],
@@ -88,6 +92,7 @@ export const AGE_PROFILES = {
     quiz: "une question de compréhension (pourquoi, comment)",
   },
   "11-13": {
+    maxTokens: 1300,
     label: "11 à 13 ans",
     pages: 12,
     choicePages: [2, 4, 6, 8, 10],
@@ -100,6 +105,7 @@ export const AGE_PROFILES = {
     quiz: "une question de compréhension ou d'inférence",
   },
   "13+": {
+    maxTokens: 1500,
     label: "13 ans et plus",
     pages: 12,
     choicePages: [2, 4, 6, 8, 10],
@@ -339,7 +345,7 @@ async function checkOperationQuota(who, env) {
   const { limit } = await limits(who, env);
   const k = `o:${who.id}:${today()}`;
   const n = intVar(await env.QUOTA.get(k), 0);
-  if (n >= Math.max(limit, 1) * 40) throw publicError(429, "Doucement ! Reviens demain pour la suite.", "ops");
+  if (n >= Math.max(limit, 1) * 70) throw publicError(429, "Doucement ! Reviens demain pour la suite.", "ops");
   await env.QUOTA.put(k, String(n + 1), { expirationTtl: 172800 });
 }
 
@@ -535,7 +541,7 @@ async function writeSafely(prompt, cfg, env, n) {
         CHILD_SAFETY_RULES,
       user: prompt + extra,
       temperature: 0.95,
-      maxTokens: 2500,
+      maxTokens: cfg.profile.maxTokens || 1200,
     });
     const data = parseJson(raw);
     if (!data) {
@@ -723,7 +729,10 @@ async function callText(env, { system, user, temperature, maxTokens, fast }) {
   const provider = textProvider(env);
 
   if (provider === "cloudflare") {
-    const models = list(env.CF_TEXT_MODELS, DEFAULT_CF_TEXT_MODELS);
+    // La relecture (réponse courte) passe par un petit modèle très rapide.
+    const models = fast
+      ? [env.CF_REVIEW_MODEL || DEFAULT_CF_REVIEW_MODEL, ...list(env.CF_TEXT_MODELS, DEFAULT_CF_TEXT_MODELS)]
+      : list(env.CF_TEXT_MODELS, DEFAULT_CF_TEXT_MODELS);
     const errors = [];
     for (const model of models) {
       const t0 = Date.now();
