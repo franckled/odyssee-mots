@@ -139,6 +139,28 @@ jobs:
           xattr -lr Payload | head -5 | while read -r l; do echo "::notice::xattr : $l"; done
           echo "IPA=$IPA" >> $GITHUB_ENV
 
+      - name: Diagnostic signature (1)
+        run: |
+          cd $RUNNER_TEMP/check
+          codesign -vvvv --deep --strict Payload/Runner.app > v.log 2>&1 || true
+          grep -vE "^\s*$" v.log | head -10 | while read -r l; do echo "::notice::$l"; done
+          cd Payload/Runner.app && codesign -d --extract-certificates . 2>/dev/null || true
+          for c in codesign0 codesign1; do
+            [ -f $c ] && openssl x509 -inform DER -in $c -noout -subject -issuer -enddate 2>&1 | while read -r l; do echo "::warning::$c $l"; done
+          done
+          rm -f codesign0 codesign1 codesign2
+
+      - name: Diagnostic signature (2)
+        run: |
+          cd $RUNNER_TEMP/check/Payload/Runner.app
+          for f in Frameworks/*; do
+            codesign -dvv "$f" 2>&1 | grep -E "Authority=Apple (Distribution|Development)|Identifier=" | tr '\n' ' ' | while read -r l; do echo "::notice::$(basename $f): $l"; done
+          done
+          ls Frameworks | tr '\n' ' ' | while read -r l; do echo "::warning::frameworks: $l"; done
+          security find-identity -v -p codesigning | head -5 | while read -r l; do echo "::warning::identité : $l"; done
+          xcodebuild -version | tr '\n' ' ' | while read -r l; do echo "::warning::$l"; done
+          continue=true
+
       - name: Envoi vers TestFlight
         run: |
           xcrun altool --upload-app -f "$IPA" -t ios \
