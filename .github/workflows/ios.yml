@@ -67,11 +67,24 @@ jobs:
           dart run flutter_launcher_icons > icons.log 2>&1 || { tail -20 icons.log | while read -r l; do echo "::warning::$l"; done; exit 1; }
 
       - name: Préparer la compilation
-        run: >
-          flutter build ios --config-only --release
-          --build-number=${{ github.run_number }}
-          --dart-define=WORKER_URL=${{ vars.WORKER_URL || secrets.WORKER_URL }}
-          --dart-define=RC_APPLE_KEY=${{ secrets.RC_APPLE_KEY }}
+        run: |
+          flutter build ios --config-only --release \
+            --build-number=${{ github.run_number }} \
+            --dart-define=WORKER_URL=${{ vars.WORKER_URL || secrets.WORKER_URL }} \
+            --dart-define=RC_APPLE_KEY=${{ secrets.RC_APPLE_KEY }} > config.log 2>&1 || {
+              # Première passe : le Podfile vient d'être créé, on le règle puis on réessaie.
+              grep -E "rror|minimum|deployment|requires" config.log | sort -u | head -15 | while read -r l; do echo "::warning::$l"; done
+              if [ -f ios/Podfile ]; then
+                sed -i '' "s/^# *platform :ios.*/platform :ios, '15.0'/" ios/Podfile
+                flutter build ios --config-only --release \
+                  --build-number=${{ github.run_number }} \
+                  --dart-define=WORKER_URL=${{ vars.WORKER_URL || secrets.WORKER_URL }} \
+                  --dart-define=RC_APPLE_KEY=${{ secrets.RC_APPLE_KEY }} > config2.log 2>&1 || {
+                    tail -30 config2.log | while read -r l; do echo "::error::$l"; done; exit 1; }
+              else
+                tail -30 config.log | while read -r l; do echo "::error::$l"; done; exit 1
+              fi
+            }
 
       - name: CocoaPods (iOS 15 minimum)
         run: |
