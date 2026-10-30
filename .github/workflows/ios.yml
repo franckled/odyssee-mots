@@ -139,8 +139,15 @@ jobs:
             git commit -m "Certificat de distribution iOS (chiffré) [skip ci]"
             git push
           fi
+          # Chaîne de confiance Apple (intermédiaire WWDR) : sans elle, l'identité est jugée invalide.
+          curl -sSL -o $RUNNER_TEMP/AppleWWDRCAG3.cer https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          curl -sSL -o $RUNNER_TEMP/AppleWWDRCAG6.cer https://www.apple.com/certificateauthority/AppleWWDRCAG6.cer
+          security import $RUNNER_TEMP/AppleWWDRCAG3.cer -k $KC -T /usr/bin/codesign || true
+          security import $RUNNER_TEMP/AppleWWDRCAG6.cer -k $KC -T /usr/bin/codesign || true
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k temp $KC > /dev/null
-          security find-identity -v -p codesigning $KC | head -3 | while read -r l; do echo "::notice::$l"; done
+          echo "::notice::Identités (toutes) :"
+          security find-identity -p codesigning $KC | head -5 | while read -r l; do echo "::notice::$l"; done
+          security find-identity -v -p codesigning $KC | head -3 | while read -r l; do echo "::notice::valide: $l"; done
           fastlane run get_provisioning_profile api_key_path:$RUNNER_TEMP/asc.json app_identifier:$BUNDLE_ID \
             output_path:$RUNNER_TEMP/profiles filename:dist.mobileprovision > profile.log 2>&1 || {
               tail -20 profile.log | while read -r l; do echo "::error::$l"; done; exit 1; }
