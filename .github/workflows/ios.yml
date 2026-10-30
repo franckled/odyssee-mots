@@ -57,7 +57,6 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" $P
           /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations array" $P
           /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations:0 string fr" $P
-          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations~ipad" $P || true
           grep -n "PRODUCT_BUNDLE_IDENTIFIER" $PBX | head -3
 
       - name: Dépendances et icône
@@ -90,7 +89,7 @@ jobs:
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>method</key><string>app-store-connect</string>
-            <key>destination</key><string>upload</string>
+            <key>destination</key><string>export</string>
             <key>teamID</key><string>${TEAM_ID}</string>
             <key>signingStyle</key><string>automatic</string>
             <key>uploadSymbols</key><true/>
@@ -116,9 +115,10 @@ jobs:
               exit 1; }
           tail -3 archive.log
 
-      - name: Envoi vers TestFlight
+      - name: Export de l'IPA (signature de distribution)
         run: |
-          trap 'echo "::error::Échec : $BASH_COMMAND"' ERR
+          APP=$RUNNER_TEMP/Runner.xcarchive/Products/Applications/Runner.app
+          codesign -dvv "$APP" 2>&1 | grep -E "Authority|TeamIdentifier" | head -3 | while read -r l; do echo "::notice::Archive : $l"; done
           xcodebuild -exportArchive -archivePath $RUNNER_TEMP/Runner.xcarchive \
             -exportOptionsPlist ExportOptions.plist -exportPath $RUNNER_TEMP/export \
             -allowProvisioningUpdates \
@@ -128,5 +128,17 @@ jobs:
               grep -E "error|Error" export.log | sort -u | head -25 | while read -r l; do echo "::error::$l"; done
               tail -15 export.log | while read -r l; do echo "::warning::$l"; done
               exit 1; }
-          tail -5 export.log
+          IPA=$(ls $RUNNER_TEMP/export/*.ipa)
+          mkdir -p $RUNNER_TEMP/check && cd $RUNNER_TEMP/check && unzip -q "$IPA"
+          codesign -dvv Payload/*.app 2>&1 | grep -E "Authority" | head -2 | while read -r l; do echo "::notice::IPA : $l"; done
+          echo "IPA=$IPA" >> $GITHUB_ENV
+
+      - name: Envoi vers TestFlight
+        run: |
+          xcrun altool --upload-app -f "$IPA" -t ios \
+            --apiKey ${{ secrets.ASC_KEY_ID }} --apiIssuer ${{ secrets.ASC_ISSUER_ID }} > upload.log 2>&1 || {
+              grep -iE "error|fail" upload.log | sort -u | head -20 | while read -r l; do echo "::error::$l"; done
+              tail -10 upload.log | while read -r l; do echo "::warning::$l"; done
+              exit 1; }
+          tail -3 upload.log
           echo "::notice::Build ${{ github.run_number }} envoyée à App Store Connect. Elle apparaîtra dans TestFlight après traitement (10 à 30 min)."
