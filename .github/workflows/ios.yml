@@ -6,6 +6,8 @@ on:
 jobs:
   testflight:
     runs-on: macos-latest
+    permissions:
+      contents: write
     timeout-minutes: 60
     env:
       BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'fr.odysseemots.app' }}
@@ -84,18 +86,6 @@ jobs:
           trap 'echo "::error::Échec : $BASH_COMMAND"' ERR
           mkdir -p ~/private_keys
           echo "${{ secrets.ASC_KEY_P8 }}" > ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
-          cat > ExportOptions.plist <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>method</key><string>app-store-connect</string>
-            <key>destination</key><string>export</string>
-            <key>teamID</key><string>${TEAM_ID}</string>
-            <key>signingStyle</key><string>automatic</string>
-            <key>uploadSymbols</key><true/>
-            <key>manageAppVersionAndBuildNumber</key><false/>
-          </dict></plist>
-          PLIST
 
       - name: Archive signée
         run: |
@@ -115,53 +105,80 @@ jobs:
               exit 1; }
           tail -3 archive.log
 
-      - name: Export de l'IPA (signature de distribution)
+      - name: Certificat et profil de distribution
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
-          APP=$RUNNER_TEMP/Runner.xcarchive/Products/Applications/Runner.app
-          codesign -dvv "$APP" 2>&1 | grep -E "Authority|TeamIdentifier" | head -3 | while read -r l; do echo "::notice::Archive : $l"; done
+          trap 'echo "::error::Échec : $BASH_COMMAND"' ERR
+          P8=~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          python3 -c "import json,os,sys; json.dump({'key_id':os.environ['ASC_KEY_ID'],'issuer_id':os.environ['ASC_ISSUER_ID'],'key':open(sys.argv[1]).read(),'in_house':False}, open(sys.argv[2],'w'))" $P8 $RUNNER_TEMP/asc.json
+          PASS=$(shasum -a 256 $P8 | cut -c1-48)
+          KC=$RUNNER_TEMP/signature.keychain-db
+          security create-keychain -p temp $KC
+          security set-keychain-settings -lut 21600 $KC
+          security unlock-keychain -p temp $KC
+          security list-keychains -d user -s $KC $(security list-keychains -d user | tr -d '"')
+          mkdir -p ios-signing
+          if [ -f ios-signing/distribution.p12.enc ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -in ios-signing/distribution.p12.enc -out $RUNNER_TEMP/dist.p12 -pass pass:$PASS
+            security import $RUNNER_TEMP/dist.p12 -k $KC -P "" -T /usr/bin/codesign -T /usr/bin/security
+          else
+            # Première fois : on crée un certificat de distribution signé ici,
+            # puis on le garde chiffré dans le dépôt pour les fois suivantes.
+            fastlane run get_certificates api_key_path:$RUNNER_TEMP/asc.json development:false \
+              output_path:$RUNNER_TEMP/certs keychain_path:$KC keychain_password:temp > cert.log 2>&1 || {
+                tail -20 cert.log | while read -r l; do echo "::error::$l"; done; exit 1; }
+            ls $RUNNER_TEMP/certs | while read -r l; do echo "::notice::certificat : $l"; done
+            P12=$(ls $RUNNER_TEMP/certs/*.p12 | head -1)
+            cp "$P12" $RUNNER_TEMP/dist.p12
+            openssl enc -aes-256-cbc -pbkdf2 -salt -in $RUNNER_TEMP/dist.p12 -out ios-signing/distribution.p12.enc -pass pass:$PASS
+            git config user.name "github-actions[bot]"
+            git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+            git add ios-signing/distribution.p12.enc
+            git commit -m "Certificat de distribution iOS (chiffré) [skip ci]"
+            git push
+          fi
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k temp $KC > /dev/null
+          security find-identity -v -p codesigning $KC | head -3 | while read -r l; do echo "::notice::$l"; done
+          fastlane run get_provisioning_profile api_key_path:$RUNNER_TEMP/asc.json app_identifier:$BUNDLE_ID \
+            output_path:$RUNNER_TEMP/profiles filename:dist.mobileprovision > profile.log 2>&1 || {
+              tail -20 profile.log | while read -r l; do echo "::error::$l"; done; exit 1; }
+          PROF=$RUNNER_TEMP/profiles/dist.mobileprovision
+          security cms -D -i $PROF > $RUNNER_TEMP/prof.plist
+          NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" $RUNNER_TEMP/prof.plist)
+          UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" $RUNNER_TEMP/prof.plist)
+          for d in ~/Library/MobileDevice/Provisioning\ Profiles ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles; do
+            mkdir -p "$d" && cp $PROF "$d/$UUID.mobileprovision"
+          done
+          echo "::notice::Profil : $NAME"
+          cat > ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict><key>${BUNDLE_ID}</key><string>${NAME}</string></dict>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          PLIST
+
+      - name: Export de l'IPA
+        run: |
           xcodebuild -exportArchive -archivePath $RUNNER_TEMP/Runner.xcarchive \
-            -exportOptionsPlist ExportOptions.plist -exportPath $RUNNER_TEMP/export \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
-            -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
-            -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} > export.log 2>&1 || {
-              grep -E "error|Error" export.log | sort -u | head -25 | while read -r l; do echo "::error::$l"; done
-              tail -15 export.log | while read -r l; do echo "::warning::$l"; done
+            -exportOptionsPlist ExportOptions.plist -exportPath $RUNNER_TEMP/export > export.log 2>&1 || {
+              grep -E "error|Error" export.log | sort -u | head -10 | while read -r l; do echo "::error::$l"; done
+              tail -10 export.log | while read -r l; do echo "::warning::$l"; done
               exit 1; }
           IPA=$(ls $RUNNER_TEMP/export/*.ipa)
           mkdir -p $RUNNER_TEMP/check && cd $RUNNER_TEMP/check && unzip -q "$IPA"
-          codesign -dvv Payload/*.app 2>&1 | grep -E "Authority|Timestamp|Signed Time|Identifier=" | head -6 | while read -r l; do echo "::notice::IPA : $l"; done
+          set +e +o pipefail
+          codesign -vvvv --deep --strict Payload/Runner.app 2>&1 | tail -3 | while read -r l; do echo "::notice::$l"; done
           echo "IPA=$IPA" >> $GITHUB_ENV
-
-      - name: Diagnostic signature (1)
-        continue-on-error: true
-        run: |
-          set +e +o pipefail
-          cd $RUNNER_TEMP/check
-          codesign -vvvv --deep --strict Payload/Runner.app > v.log 2>&1 || true
-          grep -vE "^\s*$" v.log | head -10 | while read -r l; do echo "::notice::$l"; done
-          cd Payload/Runner.app && codesign -d --extract-certificates . 2>/dev/null || true
-          for c in codesign0 codesign1; do
-            [ -f $c ] && openssl x509 -inform DER -in $c -noout -subject -issuer -enddate 2>&1 | while read -r l; do echo "::warning::$c $l"; done
-          done
-          rm -f codesign0 codesign1 codesign2
-
-      - name: Diagnostic signature (2)
-        continue-on-error: true
-        run: |
-          set +e +o pipefail
-          for f in Frameworks/*.framework; do
-            r=$(codesign --verify --strict -R="anchor apple generic" "$f" 2>&1 | tail -1)
-            echo "::error::verify $(basename $f) : $r"
-          done
-          cd $RUNNER_TEMP/check/Payload/Runner.app
-          for f in Frameworks/*; do
-            codesign -dvv "$f" 2>&1 | grep -E "Authority=Apple (Distribution|Development)|Identifier=" | tr '\n' ' ' | while read -r l; do echo "::notice::$(basename $f): $l"; done
-          done
-          ls Frameworks | tr '\n' ' ' | while read -r l; do echo "::warning::frameworks: $l"; done
-          security find-identity -v -p codesigning | head -5 | while read -r l; do echo "::warning::identité : $l"; done
-          xcodebuild -version | tr '\n' ' ' | while read -r l; do echo "::warning::$l"; done
-          continue=true
 
       - name: Envoi vers TestFlight
         run: |
