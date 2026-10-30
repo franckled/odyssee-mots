@@ -128,7 +128,7 @@ jobs:
             # puis on le garde chiffré dans le dépôt pour les fois suivantes.
             fastlane run get_certificates api_key_path:$RUNNER_TEMP/asc.json development:false \
               output_path:$RUNNER_TEMP/certs keychain_path:$KC keychain_password:temp > cert.log 2>&1 || {
-                tail -20 cert.log | while read -r l; do echo "::error::$l"; done; exit 1; }
+                grep -E "\[!\]|rror|not |No |Could|Unable|Missing|fail" cert.log | head -15 | while read -r l; do echo "::error::$l"; done; exit 1; }
             ls $RUNNER_TEMP/certs | while read -r l; do echo "::notice::certificat : $l"; done
             P12=$(ls $RUNNER_TEMP/certs/*.p12 | head -1)
             cp "$P12" $RUNNER_TEMP/dist.p12
@@ -150,7 +150,8 @@ jobs:
           security find-identity -v -p codesigning $KC | head -3 | while read -r l; do echo "::notice::valide: $l"; done
           fastlane run get_provisioning_profile api_key_path:$RUNNER_TEMP/asc.json app_identifier:$BUNDLE_ID \
             output_path:$RUNNER_TEMP/profiles filename:dist.mobileprovision > profile.log 2>&1 || {
-              tail -20 profile.log | while read -r l; do echo "::error::$l"; done; exit 1; }
+              grep -E "\[!\]|rror|not |No |Could|Unable|Missing|fail" profile.log | head -15 | while read -r l; do echo "::error::$l"; done
+              head -12 profile.log | while read -r l; do echo "::warning::$l"; done; exit 1; }
           PROF=$RUNNER_TEMP/profiles/dist.mobileprovision
           security cms -D -i $PROF > $RUNNER_TEMP/prof.plist
           NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" $RUNNER_TEMP/prof.plist)
