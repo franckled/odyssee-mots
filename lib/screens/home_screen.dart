@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../api.dart';
+import '../billing/billing.dart';
 import '../storage.dart';
 import '../theme.dart';
 import '../widgets/parent_gate.dart';
@@ -32,6 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final q = await StoryApi().status();
       if (mounted) setState(() => quota = q);
+      await Billing.init(s.deviceId);
     } catch (_) {
       // hors ligne : on affichera le quota plus tard
     }
@@ -157,7 +159,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       const Padding(
                         padding: EdgeInsets.fromLTRB(24, 4, 24, 20),
                         child: Text(
-                          'Histoires et illustrations créées avec une intelligence artificielle.\nVersion 0.2.0',
+                          'Histoires et illustrations créées avec une intelligence artificielle.\nVersion 0.3.0',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.white54, fontSize: 13),
                         ),

@@ -1,0 +1,116 @@
+name: iOS → TestFlight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  testflight:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'fr.odysseemots.app' }}
+      TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vérifier les secrets
+        run: |
+          missing=""
+          for v in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
+            [ -z "${!v}" ] && missing="$missing $v"
+          done
+          [ -z "${WORKER_URL}" ] && missing="$missing WORKER_URL(variable)"
+          if [ -n "$missing" ]; then echo "::error::Secrets manquants :$missing"; exit 1; fi
+          [ -z "${RC_APPLE_KEY}" ] && echo "::warning::RC_APPLE_KEY absent : l'abonnement sera désactivé dans cette version."
+          true
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          WORKER_URL: ${{ vars.WORKER_URL }}
+          RC_APPLE_KEY: ${{ secrets.RC_APPLE_KEY }}
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Créer le projet iOS
+        run: |
+          flutter create . --platforms=ios --project-name odyssee_mots --org fr.odysseemots
+          PBX=ios/Runner.xcodeproj/project.pbxproj
+          sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = fr.odysseemots.odysseeMots;/PRODUCT_BUNDLE_IDENTIFIER = ${BUNDLE_ID};/g" $PBX
+          sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g" $PBX
+          sed -i '' "s/^# platform :ios.*/platform :ios, '15.0'/" ios/Podfile
+          P=ios/Runner/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Odyssée Mots" $P
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDevelopmentRegion fr" $P
+          /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" $P
+          /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations array" $P
+          /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations:0 string fr" $P
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations~ipad" $P || true
+          grep -n "PRODUCT_BUNDLE_IDENTIFIER" $PBX | head -3
+
+      - name: Dépendances et icône
+        run: |
+          flutter pub get
+          dart run flutter_launcher_icons
+
+      - name: Préparer la compilation
+        run: >
+          flutter build ios --config-only --release
+          --build-number=${{ github.run_number }}
+          --dart-define=WORKER_URL=${{ vars.WORKER_URL }}
+          --dart-define=RC_APPLE_KEY=${{ secrets.RC_APPLE_KEY }}
+
+      - name: Clé App Store Connect
+        run: |
+          mkdir -p ~/private_keys
+          echo "${{ secrets.ASC_KEY_P8 }}" > ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          cat > ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          PLIST
+
+      - name: Archive signée
+        run: |
+          set -o pipefail
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath $RUNNER_TEMP/Runner.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+            -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
+            -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
+            DEVELOPMENT_TEAM=$TEAM_ID CODE_SIGN_STYLE=Automatic \
+            archive > archive.log 2>&1 || {
+              grep -E "error:|Error|requires a provisioning|No Accounts|No profiles" archive.log | sort -u | head -25 | while read -r l; do echo "::error::$l"; done
+              tail -15 archive.log | while read -r l; do echo "::warning::$l"; done
+              exit 1; }
+          tail -3 archive.log
+
+      - name: Envoi vers TestFlight
+        run: |
+          xcodebuild -exportArchive -archivePath $RUNNER_TEMP/Runner.xcarchive \
+            -exportOptionsPlist ExportOptions.plist -exportPath $RUNNER_TEMP/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+            -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
+            -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} > export.log 2>&1 || {
+              grep -E "error|Error" export.log | sort -u | head -25 | while read -r l; do echo "::error::$l"; done
+              tail -15 export.log | while read -r l; do echo "::warning::$l"; done
+              exit 1; }
+          tail -5 export.log
+          echo "::notice::Build ${{ github.run_number }} envoyée à App Store Connect. Elle apparaîtra dans TestFlight après traitement (10 à 30 min)."

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../storage.dart';
 import '../theme.dart';
+import 'subscription_screen.dart';
 
 class ParentScreen extends StatefulWidget {
   const ParentScreen({super.key});
@@ -98,9 +99,12 @@ class _ParentScreenState extends State<ParentScreen> {
               const SizedBox(height: 10),
               if (quota != null && !quota!.admin && !quota!.premium)
                 FilledButton.icon(
-                  onPressed: null,
+                  onPressed: () async {
+                    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SubscriptionScreen()));
+                    _loadQuota();
+                  },
                   icon: const Icon(Icons.auto_awesome),
-                  label: const Text('Abonnement mensuel — bientôt dans l\'appli mobile'),
+                  label: const Text('Plus d\'histoires : l\'abonnement'),
                 ),
               if (s.deviceId.isNotEmpty)
                 Padding(
@@ -164,6 +168,10 @@ class _ParentScreenState extends State<ParentScreen> {
                 for (final r in reports)
                   Padding(padding: const EdgeInsets.only(bottom: 8), child: _Info(r)),
               const SizedBox(height: 24),
+              TextButton(
+                onPressed: () => openLink(privacyUrl),
+                child: const Text('Politique de confidentialité'),
+              ),
               OutlinedButton.icon(
                 onPressed: _clear,
                 icon: const Icon(Icons.delete_outline),
