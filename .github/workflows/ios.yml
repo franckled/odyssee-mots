@@ -51,7 +51,6 @@ jobs:
           PBX=ios/Runner.xcodeproj/project.pbxproj
           sed -i '' "s/PRODUCT_BUNDLE_IDENTIFIER = fr.odysseemots.odysseeMots;/PRODUCT_BUNDLE_IDENTIFIER = ${BUNDLE_ID};/g" $PBX
           sed -i '' "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g" $PBX
-          sed -i '' "s/^# platform :ios.*/platform :ios, '15.0'/" ios/Podfile
           P=ios/Runner/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Odyssée Mots" $P
           /usr/libexec/PlistBuddy -c "Set :CFBundleDevelopmentRegion fr" $P
@@ -73,6 +72,13 @@ jobs:
           --build-number=${{ github.run_number }}
           --dart-define=WORKER_URL=${{ vars.WORKER_URL || secrets.WORKER_URL }}
           --dart-define=RC_APPLE_KEY=${{ secrets.RC_APPLE_KEY }}
+
+      - name: CocoaPods (iOS 15 minimum)
+        run: |
+          trap 'echo "::error::Échec : $BASH_COMMAND"' ERR
+          sed -i '' "s/^# *platform :ios.*/platform :ios, '15.0'/" ios/Podfile
+          grep -n "platform :ios" ios/Podfile
+          cd ios && pod install > ../pod.log 2>&1 || { tail -25 ../pod.log | while read -r l; do echo "::warning::$l"; done; exit 1; }
 
       - name: Clé App Store Connect
         run: |
