@@ -111,55 +111,50 @@ jobs:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           trap 'echo "::error::Échec : $BASH_COMMAND"' ERR
-          P8=~/private_keys/AuthKey_${ASC_KEY_ID}.p8
-          python3 -c "import json,os,sys; json.dump({'key_id':os.environ['ASC_KEY_ID'],'issuer_id':os.environ['ASC_ISSUER_ID'],'key':open(sys.argv[1]).read(),'in_house':False}, open(sys.argv[2],'w'))" $P8 $RUNNER_TEMP/asc.json
-          PASS=$(shasum -a 256 $P8 | cut -c1-48)
-          KC=$RUNNER_TEMP/signature.keychain-db
-          security create-keychain -p temp $KC
-          security set-keychain-settings -lut 21600 $KC
-          security unlock-keychain -p temp $KC
-          security list-keychains -d user -s $KC $(security list-keychains -d user | tr -d '"')
-          mkdir -p ios-signing
-          if [ -f ios-signing/distribution.p12.enc ]; then
-            openssl enc -d -aes-256-cbc -pbkdf2 -in ios-signing/distribution.p12.enc -out $RUNNER_TEMP/dist.p12 -pass pass:$PASS
-            security import $RUNNER_TEMP/dist.p12 -k $KC -P "" -T /usr/bin/codesign -T /usr/bin/security
-          else
-            # Première fois : on crée un certificat de distribution signé ici,
-            # puis on le garde chiffré dans le dépôt pour les fois suivantes.
-            fastlane run get_certificates api_key_path:$RUNNER_TEMP/asc.json development:false \
-              output_path:$RUNNER_TEMP/certs keychain_path:$KC keychain_password:temp > cert.log 2>&1 || {
-                grep -E "\[!\]|rror|not |No |Could|Unable|Missing|fail" cert.log | head -15 | while read -r l; do echo "::error::$l"; done; exit 1; }
-            ls $RUNNER_TEMP/certs | while read -r l; do echo "::notice::certificat : $l"; done
-            P12=$(ls $RUNNER_TEMP/certs/*.p12 | head -1)
-            cp "$P12" $RUNNER_TEMP/dist.p12
-            openssl enc -aes-256-cbc -pbkdf2 -salt -in $RUNNER_TEMP/dist.p12 -out ios-signing/distribution.p12.enc -pass pass:$PASS
-            git config user.name "github-actions[bot]"
-            git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
-            git add ios-signing/distribution.p12.enc
-            git commit -m "Certificat de distribution iOS (chiffré) [skip ci]"
-            git push
+          set -o pipefail
+          # Clé privée durable (branche ci-signing) ; certificat et profil réutilisés via l'API.
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q pyjwt cryptography
+          if git fetch -q --depth 1 origin ci-signing 2>/dev/null; then
+            git show FETCH_HEAD:dist_key.enc > "$RUNNER_TEMP/dist_key.enc" || true
           fi
-          # Chaîne de confiance Apple (intermédiaire WWDR) : sans elle, l'identité est jugée invalide.
-          curl -sSL -o $RUNNER_TEMP/AppleWWDRCAG3.cer https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
-          curl -sSL -o $RUNNER_TEMP/AppleWWDRCAG6.cer https://www.apple.com/certificateauthority/AppleWWDRCAG6.cer
-          security import $RUNNER_TEMP/AppleWWDRCAG3.cer -k $KC -T /usr/bin/codesign || true
-          security import $RUNNER_TEMP/AppleWWDRCAG6.cer -k $KC -T /usr/bin/codesign || true
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k temp $KC > /dev/null
-          echo "::notice::Identités (toutes) :"
-          security find-identity -p codesigning $KC | head -5 | while read -r l; do echo "::notice::$l"; done
-          security find-identity -v -p codesigning $KC | head -3 | while read -r l; do echo "::notice::valide: $l"; done
-          fastlane run get_provisioning_profile api_key_path:$RUNNER_TEMP/asc.json app_identifier:$BUNDLE_ID \
-            output_path:$RUNNER_TEMP/profiles filename:dist.mobileprovision > profile.log 2>&1 || {
-              grep -E "\[!\]|rror|not |No |Could|Unable|Missing|fail" profile.log | head -15 | while read -r l; do echo "::error::$l"; done
-              head -12 profile.log | while read -r l; do echo "::warning::$l"; done; exit 1; }
-          PROF=$RUNNER_TEMP/profiles/dist.mobileprovision
-          security cms -D -i $PROF > $RUNNER_TEMP/prof.plist
-          NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" $RUNNER_TEMP/prof.plist)
-          UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" $RUNNER_TEMP/prof.plist)
-          for d in ~/Library/MobileDevice/Provisioning\ Profiles ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles; do
-            mkdir -p "$d" && cp $PROF "$d/$UUID.mobileprovision"
+          PASS=$(openssl rand -hex 16)
+          echo "::add-mask::$PASS"
+          KEY_ID=$ASC_KEY_ID ISSUER_ID=$ASC_ISSUER_ID KEY_PATH=$HOME/private_keys/AuthKey_$ASC_KEY_ID.p8 \
+            BUNDLE_ID=$BUNDLE_ID OUT_DIR="$RUNNER_TEMP/signing" P12_PASSWORD="$PASS" \
+            KEY_STORE="$RUNNER_TEMP/dist_key.enc" NEW_KEY_STORE="$RUNNER_TEMP/dist_key.new.enc" \
+            "$RUNNER_TEMP/venv/bin/python" tool/asc_signing.py setup 2>&1 | tee "$RUNNER_TEMP/signing.log"
+          eval "$(grep -E '^ASC_[A-Z_]+=' "$RUNNER_TEMP/signing.log" | sed 's/^/export /')"
+          if [ -n "${ASC_NEW_KEY:-}" ]; then
+            D="$RUNNER_TEMP/ci-signing"
+            mkdir -p "$D"
+            cp "$ASC_NEW_KEY" "$D/dist_key.enc"
+            echo "Clé privée du certificat Apple Distribution, chiffrée. Ne pas supprimer." > "$D/README"
+            cd "$D"
+            git init -q -b ci-signing
+            git add -A
+            git -c user.name="github-actions[bot]" -c user.email="41898299+github-actions[bot]@users.noreply.github.com" commit -q -m "Clé de signature iOS (chiffrée)"
+            git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-signing
+            cd "$GITHUB_WORKSPACE"
+          fi
+          # Trousseau de signature
+          KC=$RUNNER_TEMP/signing.keychain-db
+          security create-keychain -p temp "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p temp "$KC"
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          curl -fsSL -o "$RUNNER_TEMP/wwdr3.cer" https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
+          security import "$RUNNER_TEMP/wwdr3.cer" -k "$KC" -T /usr/bin/codesign || true
+          security import "$ASC_P12_PATH" -k "$KC" -P "$PASS" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k temp "$KC" > /dev/null
+          security find-identity -v -p codesigning "$KC" | head -3 | while read -r l; do echo "::notice::$l"; done
+          echo "KEYCHAIN=$KC" >> $GITHUB_ENV
+          # Profil App Store
+          for d in "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$d"
+            cp "$ASC_PROFILE_PATH" "$d/$ASC_PROFILE_UUID.mobileprovision"
           done
-          echo "::notice::Profil : $NAME"
+          echo "::notice::Profil : $ASC_PROFILE_NAME"
           cat > ExportOptions.plist <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -169,7 +164,7 @@ jobs:
             <key>teamID</key><string>${TEAM_ID}</string>
             <key>signingStyle</key><string>manual</string>
             <key>signingCertificate</key><string>Apple Distribution</string>
-            <key>provisioningProfiles</key><dict><key>${BUNDLE_ID}</key><string>${NAME}</string></dict>
+            <key>provisioningProfiles</key><dict><key>${BUNDLE_ID}</key><string>${ASC_PROFILE_NAME}</string></dict>
             <key>uploadSymbols</key><true/>
             <key>manageAppVersionAndBuildNumber</key><false/>
           </dict></plist>
