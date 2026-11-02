@@ -26,6 +26,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   bool loading = true;
   bool busy = false;
   bool premium = false;
+  int? freeLimit;
   String? message;
 
   @override
@@ -38,10 +39,16 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     await Billing.init(Storage.instance.deviceId);
     final o = await Billing.monthlyOffer();
     final p = await Billing.isPremium();
+    int? free;
+    try {
+      final q = await StoryApi().status();
+      if (!q.premium && !q.admin) free = q.limit;
+    } catch (_) {}
     if (!mounted) return;
     setState(() {
       offer = o;
       premium = p;
+      freeLimit = free;
       loading = false;
     });
   }
@@ -107,7 +114,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: AppColors.navy)),
               const SizedBox(height: 18),
-              const _Benefit('📖', 'Jusqu\'à 10 histoires illustrées par jour, au lieu de 2'),
+              _Benefit('📖', freeLimit == null
+                  ? 'Jusqu\'à 10 histoires illustrées par jour'
+                  : 'Jusqu\'à 10 histoires illustrées par jour, au lieu de ${freeLimit == 1 ? 'une seule' : '$freeLimit'}'),
               const _Benefit('🌟', 'L\'album d\'autocollants : chaque page illustrée lue devient un autocollant à collectionner'),
               const _Benefit('🎨', 'Toutes les tranches d\'âge et tous les univers'),
               const _Benefit('🛡️', 'Les mêmes protections pour votre enfant, sans publicité'),

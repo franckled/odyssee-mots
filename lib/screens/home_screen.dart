@@ -168,7 +168,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       const Padding(
                         padding: EdgeInsets.fromLTRB(24, 4, 24, 20),
                         child: Text(
-                          'Histoires et illustrations créées avec une intelligence artificielle.\nVersion 0.3.2',
+                          'Histoires et illustrations créées avec une intelligence artificielle.\nVersion 0.3.3',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.white54, fontSize: 13),
                         ),

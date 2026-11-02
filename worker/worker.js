@@ -231,7 +231,7 @@ export default {
  * puis Worker → Settings → Bindings → Add → KV namespace → nom de variable : QUOTA.
  *
  * Variables facultatives (texte) :
- *   FREE_STORIES_PER_DAY     (2 par défaut)   histoires gratuites par appareil et par jour
+ *   FREE_STORIES_PER_DAY     (1 par défaut)   histoires gratuites par appareil et par jour
  *   PREMIUM_STORIES_PER_DAY  (10 par défaut)  usage raisonnable pour les abonnés
  *   GLOBAL_STORIES_PER_DAY   (100 par défaut) plafond total, garde-fou des dépenses
  * Secrets facultatifs :
@@ -299,7 +299,7 @@ async function premiumUntil(id, env) {
 
 async function limits(who, env) {
   const until = await premiumUntil(who.id, env);
-  const limit = until ? intVar(env.PREMIUM_STORIES_PER_DAY, 10) : intVar(env.FREE_STORIES_PER_DAY, 2);
+  const limit = until ? intVar(env.PREMIUM_STORIES_PER_DAY, 10) : intVar(env.FREE_STORIES_PER_DAY, 1);
   const used = intVar(await env.QUOTA.get(`s:${who.id}:${today()}`), 0);
   return { until, limit, used };
 }
