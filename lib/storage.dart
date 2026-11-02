@@ -46,6 +46,13 @@ class Storage {
   String get lastAge => _p.getString('lastAge') ?? '7-9';
   set lastAge(String v) => _p.setString('lastAge', v);
 
+  String get lastImageStyle {
+    final v = _p.getString('lastImageStyle') ?? defaultIllustrationStyle;
+    return illustrationStyles.any((o) => o.key == v) ? v : defaultIllustrationStyle;
+  }
+
+  set lastImageStyle(String v) => _p.setString('lastImageStyle', v);
+
   // ---- Étoiles de lecture ----
   int get stars => _p.getInt('stars') ?? 0;
   void addStars(int n) => _p.setInt('stars', stars + n);
@@ -106,6 +113,43 @@ class Storage {
   Future<void> deleteStory(String id) async {
     final raw = stories.where((s) => s.id != id).map((s) => jsonEncode(s.toJson())).toList();
     await _p.setStringList('stories', raw);
+  }
+
+  // ---- Album d'autocollants ----
+  /// Nombre maximal d'autocollants gardés (vignettes légères) : au-delà, les
+  /// plus anciens laissent la place aux nouveaux.
+  static const maxStickers = 48;
+
+  List<Sticker> get stickers {
+    final raw = _p.getStringList('stickers') ?? [];
+    final out = <Sticker>[];
+    for (final s in raw) {
+      try {
+        final st = Sticker.fromJson(jsonDecode(s));
+        if (st != null) out.add(st);
+      } catch (_) {
+        // autocollant illisible : on l'ignore
+      }
+    }
+    return out;
+  }
+
+  bool hasSticker(String storyId, int page) =>
+      stickers.any((s) => s.storyId == storyId && s.page == page);
+
+  Future<void> addSticker(Sticker sticker) async {
+    final list = stickers.where((s) => s.key != sticker.key).toList();
+    list.insert(0, sticker);
+    var keep = maxStickers;
+    while (keep > 0) {
+      try {
+        await _p.setStringList('stickers', list.take(keep).map((s) => jsonEncode(s.toJson())).toList());
+        return;
+      } catch (_) {
+        // Mémoire pleine (navigateur) : on garde moins d'autocollants.
+        keep = keep ~/ 2;
+      }
+    }
   }
 
   // ---- Signalements faits par le parent ----

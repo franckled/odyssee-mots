@@ -22,6 +22,7 @@ class _SetupScreenState extends State<SetupScreen> {
   String? name;
   String color = 'jaune';
   String universe = 'foret';
+  late String imageStyle = Storage.instance.lastImageStyle;
   String parentContext = '';
   final nameCtrl = TextEditingController();
 
@@ -91,6 +92,7 @@ class _SetupScreenState extends State<SetupScreen> {
 
   void _start() {
     Storage.instance.lastAge = age;
+    Storage.instance.lastImageStyle = imageStyle;
     final hero = StoryHero(kind: kind!, species: species, name: name!.trim(), color: color);
     Navigator.of(context).pushReplacement(MaterialPageRoute(
       builder: (_) => ReaderScreen.newStory(
@@ -98,6 +100,7 @@ class _SetupScreenState extends State<SetupScreen> {
         hero: hero,
         universe: universe,
         parentContext: parentContext,
+        imageStyle: imageStyle,
       ),
     ));
   }
@@ -209,6 +212,12 @@ class _SetupScreenState extends State<SetupScreen> {
                 options: universes,
                 selected: universe,
                 onTap: (k) => setState(() => universe = k),
+              ),
+              const _Question('Comment veux-tu les dessins ?'),
+              _CardGrid(
+                options: illustrationStyles,
+                selected: imageStyle,
+                onTap: (k) => setState(() => imageStyle = k),
               ),
               const SizedBox(height: 28),
               OutlinedButton.icon(

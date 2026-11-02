@@ -129,6 +129,7 @@ class StoryApi {
     required StoryHero hero,
     required String universe,
     required String parentContext,
+    String imageStyle = defaultIllustrationStyle,
   }) async {
     final data = await _post('/start', {
       'age': age,
@@ -145,6 +146,7 @@ class StoryApi {
       hero: hero,
       universe: universe,
       parentContext: parentContext,
+      imageStyle: imageStyle,
       createdAt: DateTime.now(),
       pages: [StoryPage.fromJson(Map<String, dynamic>.from(data['page']))],
     );
@@ -171,12 +173,18 @@ class StoryApi {
   }
 
   /// Renvoie l'illustration, ou null si elle a été bloquée par les filtres.
-  Future<Uint8List?> image({required String scene, required String heroSheet, Uint8List? reference}) async {
+  Future<Uint8List?> image({
+    required String scene,
+    required String heroSheet,
+    String style = defaultIllustrationStyle,
+    Uint8List? reference,
+  }) async {
     final data = await _post(
       '/image',
       {
         'scene': scene,
         'heroSheet': heroSheet,
+        'style': style,
         if (reference != null) 'reference': base64Encode(reference),
         if (reference != null) 'referenceMime': 'image/png',
       },

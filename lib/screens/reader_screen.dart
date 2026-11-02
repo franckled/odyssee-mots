@@ -15,6 +15,7 @@ class ReaderScreen extends StatefulWidget {
   final StoryHero? hero;
   final String universe;
   final String parentContext;
+  final String imageStyle;
 
   const ReaderScreen.newStory({
     super.key,
@@ -22,6 +23,7 @@ class ReaderScreen extends StatefulWidget {
     required StoryHero this.hero,
     required this.universe,
     required this.parentContext,
+    this.imageStyle = defaultIllustrationStyle,
   }) : existing = null;
 
   ReaderScreen.resume(Story story, {super.key})
@@ -29,7 +31,8 @@ class ReaderScreen extends StatefulWidget {
         age = story.age,
         hero = story.hero,
         universe = story.universe,
-        parentContext = story.parentContext;
+        parentContext = story.parentContext,
+        imageStyle = story.imageStyle;
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -86,6 +89,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
         hero: widget.hero!,
         universe: widget.universe,
         parentContext: widget.parentContext,
+        imageStyle: widget.imageStyle,
       );
       if (!mounted) return;
       setState(() => story = st);
@@ -114,12 +118,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
         final bytes = await api.image(
           scene: page.scene,
           heroSheet: st.heroSheet,
+          style: st.imageStyle,
           reference: page.number == 1 ? null : st.cover,
         );
         if (bytes == null) {
           page.imageFailed = true;
         } else {
           page.image = bytes;
+          // Page déjà lue avant l'arrivée de l'image : l'autocollant arrive maintenant.
+          if (page.read) unawaited(_collectSticker(st, page));
           if (page.number == 1 && st.cover == null) {
             try {
               st.cover = await shrinkImage(bytes);
@@ -187,6 +194,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
       s.addStars(1);
     });
     s.saveStory(story!);
+    unawaited(_collectSticker(story!, page));
+  }
+
+  /// Chaque page illustrée lue rejoint l'album d'autocollants (petite vignette).
+  Future<void> _collectSticker(Story st, StoryPage p) async {
+    final img = p.image;
+    if (img == null || p.reported || s.hasSticker(st.id, p.number)) return;
+    try {
+      final thumb = await shrinkImage(img, width: 160);
+      await s.addSticker(Sticker(
+        storyId: st.id,
+        page: p.number,
+        title: st.title,
+        image: thumb,
+        earnedAt: DateTime.now(),
+      ));
+    } catch (_) {
+      // vignette impossible : pas d'autocollant pour cette page
+    }
   }
 
   void _answer(int i) {

@@ -88,6 +88,57 @@ const universes = <Option>[
   Option('surprise', 'Surprise !', '🎁'),
 ];
 
+/// Styles d'illustration (les clés correspondent au serveur).
+const illustrationStyles = <Option>[
+  Option('aquarelle', 'Aquarelle', '🎨'),
+  Option('crayons', 'Crayons de couleur', '🖍️'),
+  Option('papier', 'Papier découpé', '✂️'),
+  Option('pate', 'Pâte à modeler', '🧸'),
+];
+
+const defaultIllustrationStyle = 'aquarelle';
+
+/// Autocollant gagné en lisant une page illustrée (petite vignette).
+class Sticker {
+  final String storyId;
+  final int page;
+  final String title;
+  final Uint8List image;
+  final DateTime earnedAt;
+  const Sticker({
+    required this.storyId,
+    required this.page,
+    required this.title,
+    required this.image,
+    required this.earnedAt,
+  });
+
+  String get key => '$storyId#$page';
+
+  Map<String, dynamic> toJson() => {
+        'storyId': storyId,
+        'page': page,
+        'title': title,
+        'image': base64Encode(image),
+        'earnedAt': earnedAt.toIso8601String(),
+      };
+
+  static Sticker? fromJson(dynamic j) {
+    if (j is! Map || j['image'] is! String) return null;
+    try {
+      return Sticker(
+        storyId: (j['storyId'] ?? '').toString(),
+        page: (j['page'] as num?)?.toInt() ?? 0,
+        title: (j['title'] ?? '').toString(),
+        image: base64Decode(j['image'] as String),
+        earnedAt: DateTime.tryParse((j['earnedAt'] ?? '').toString()) ?? DateTime.now(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 class StoryHero {
   final String kind;
   final String species;
@@ -224,6 +275,7 @@ class Story {
   final StoryHero hero;
   final String universe;
   final String parentContext;
+  final String imageStyle;
   final DateTime createdAt;
   final List<StoryPage> pages;
 
@@ -240,6 +292,7 @@ class Story {
     required this.hero,
     required this.universe,
     required this.parentContext,
+    this.imageStyle = defaultIllustrationStyle,
     required this.createdAt,
     required this.pages,
     this.cover,
@@ -258,6 +311,7 @@ class Story {
         'hero': hero.toJson(),
         'universe': universe,
         'parentContext': parentContext,
+        'imageStyle': imageStyle,
         'createdAt': createdAt.toIso8601String(),
         'pages': pages.map((p) => p.toJson()).toList(),
         'cover': cover == null ? null : base64Encode(cover!),
@@ -272,6 +326,7 @@ class Story {
         hero: StoryHero.fromJson(Map<String, dynamic>.from(j['hero'] ?? {})),
         universe: (j['universe'] ?? 'surprise').toString(),
         parentContext: (j['parentContext'] ?? '').toString(),
+        imageStyle: (j['imageStyle'] ?? defaultIllustrationStyle).toString(),
         createdAt: DateTime.tryParse(j['createdAt'] ?? '') ?? DateTime.now(),
         pages: ((j['pages'] as List?) ?? [])
             .map((p) => StoryPage.fromJson(Map<String, dynamic>.from(p)))

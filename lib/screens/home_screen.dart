@@ -9,6 +9,7 @@ import '../widgets/quota_view.dart';
 import 'library_screen.dart';
 import 'parent_screen.dart';
 import 'setup_screen.dart';
+import 'stickers_screen.dart';
 import 'words_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -147,6 +148,14 @@ class _HomeScreenState extends State<HomeScreen> {
                               textColor: AppColors.navy,
                               onTap: () => _go(const WordsScreen()),
                             ),
+                            const SizedBox(height: 14),
+                            _HomeButton(
+                              emoji: '🌟',
+                              label: 'Mes autocollants',
+                              color: AppColors.lilac,
+                              textColor: AppColors.navy,
+                              onTap: () => _go(const StickersScreen()),
+                            ),
                           ],
                         ),
                       ),
@@ -159,7 +168,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       const Padding(
                         padding: EdgeInsets.fromLTRB(24, 4, 24, 20),
                         child: Text(
-                          'Histoires et illustrations créées avec une intelligence artificielle.\nVersion 0.3.1',
+                          'Histoires et illustrations créées avec une intelligence artificielle.\nVersion 0.3.2',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.white54, fontSize: 13),
                         ),

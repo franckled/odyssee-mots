@@ -108,6 +108,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: AppColors.navy)),
               const SizedBox(height: 18),
               const _Benefit('📖', 'Jusqu\'à 10 histoires illustrées par jour, au lieu de 2'),
+              const _Benefit('🌟', 'L\'album d\'autocollants : chaque page illustrée lue devient un autocollant à collectionner'),
               const _Benefit('🎨', 'Toutes les tranches d\'âge et tous les univers'),
               const _Benefit('🛡️', 'Les mêmes protections pour votre enfant, sans publicité'),
               const SizedBox(height: 20),

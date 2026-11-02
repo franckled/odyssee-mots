@@ -635,19 +635,42 @@ function localBlocklist(text) {
 /* Illustration                                                        */
 /* ------------------------------------------------------------------ */
 
-const IMAGE_STYLE =
-  "Cheerful, fresh children's picture-book illustration. Soft gouache and watercolor texture, rounded friendly shapes, simple clean outlines, " +
-  "bright yet gentle pastel palette (coral, sunny yellow, mint green, sky blue, cream), warm light, cozy and joyful atmosphere. " +
-  "Expressive happy faces. Absolutely no text, letters, words, numbers, logos or watermarks in the image. " +
-  "Strictly child-safe: no violence, no weapons, no scary or dark imagery, everyone fully and modestly dressed.";
+// Styles d'illustration au choix (clé envoyée par l'application).
+const IMAGE_STYLES = {
+  aquarelle:
+    "Classic storybook watercolor illustration, hand-painted on textured paper, visible soft brush strokes and gentle color bleeds, " +
+    "delicate ink linework, warm natural light, harmonious fresh palette, detailed whimsical background, " +
+    "like a timeless European children's picture book.",
+  crayons:
+    "Children's book illustration drawn with colored pencils and wax crayons on cream paper, visible pencil strokes and paper grain, " +
+    "soft hand shading, warm cheerful colors, charming hand-drawn look.",
+  papier:
+    "Cut-paper collage illustration for a children's book, layered textured paper shapes with soft shadows between layers, " +
+    "simple bold forms, bright cheerful colors, handcrafted look.",
+  pate:
+    "Cute claymation scene, characters and set made of colorful modeling clay, soft rounded shapes, subtle fingerprint texture, " +
+    "miniature diorama, soft studio lighting, shallow depth of field.",
+};
+const DEFAULT_IMAGE_STYLE = "aquarelle";
+
+const IMAGE_SAFETY =
+  "Child-friendly picture-book image with expressive, kind faces. " +
+  "Absolutely no text, letters, words, numbers, logos or watermarks in the image. " +
+  "Strictly child-safe: no violence, no weapons, nothing scary or dark, everyone fully and modestly dressed.";
+
+function imageStyle(key) {
+  const k = typeof key === "string" && Object.hasOwn(IMAGE_STYLES, key) ? key : DEFAULT_IMAGE_STYLE;
+  return `${IMAGE_STYLES[k]} ${IMAGE_SAFETY}`;
+}
 
 async function drawImage(body, env, cors) {
   const scene = clean(body.scene, 600);
   const hero = clean(body.heroSheet, 400);
   if (!scene) throw publicError(400, "Scène manquante");
 
+  const style = imageStyle(body.style);
   const parts = [];
-  let instruction = `${IMAGE_STYLE}\n\nMain character (must look exactly the same on every page): ${hero}\n\nScene: ${scene}`;
+  let instruction = `${style}\n\nMain character (must look exactly the same on every page): ${hero}\n\nScene: ${scene}`;
 
   const ref = typeof body.reference === "string" ? body.reference : "";
   if (ref && ref.length < 2_000_000) {
@@ -664,7 +687,7 @@ async function drawImage(body, env, cors) {
     // FLUX.1 schnell : rapide et gratuit dans la limite du quota, mais ne
     // reçoit pas d'image modèle. La fiche du héros, répétée à chaque page,
     // assure la ressemblance.
-    const prompt = `${IMAGE_STYLE}\n\nMain character, identical on every page: ${hero}\n\nScene: ${scene}`.slice(0, 2000);
+    const prompt = `${style}\n\nMain character, identical on every page: ${hero}\n\nScene: ${scene}`.slice(0, 2000);
     let out;
     try {
       const t0 = Date.now();
