@@ -124,7 +124,7 @@ jobs:
             BUNDLE_ID=$BUNDLE_ID OUT_DIR="$RUNNER_TEMP/signing" P12_PASSWORD="$PASS" \
             KEY_STORE="$RUNNER_TEMP/dist_key.enc" NEW_KEY_STORE="$RUNNER_TEMP/dist_key.new.enc" \
             "$RUNNER_TEMP/venv/bin/python" tool/asc_signing.py setup 2>&1 | tee "$RUNNER_TEMP/signing.log"
-          eval "$(grep -E '^ASC_[A-Z_]+=' "$RUNNER_TEMP/signing.log" | sed 's/^/export /')"
+          eval "$(grep -E '^ASC_[A-Z0-9_]+=' "$RUNNER_TEMP/signing.log" | sed 's/^/export /')"
           if [ -n "${ASC_NEW_KEY:-}" ]; then
             D="$RUNNER_TEMP/ci-signing"
             mkdir -p "$D"
