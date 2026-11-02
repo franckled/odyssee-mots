@@ -145,7 +145,11 @@ jobs:
           security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
           curl -fsSL -o "$RUNNER_TEMP/wwdr3.cer" https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer
           security import "$RUNNER_TEMP/wwdr3.cer" -k "$KC" -T /usr/bin/codesign || true
-          security import "$ASC_P12_PATH" -k "$KC" -P "$PASS" -T /usr/bin/codesign -T /usr/bin/security
+          echo "::notice::p12 : ${ASC_P12_PATH:-VIDE} ($(wc -c < "${ASC_P12_PATH:-/dev/null}" 2>/dev/null) octets)"
+          security import "$ASC_P12_PATH" -k "$KC" -P "$PASS" -T /usr/bin/codesign -T /usr/bin/security > "$RUNNER_TEMP/import.log" 2>&1 || {
+            grep -v '^$' "$RUNNER_TEMP/import.log" | head -8 | while read -r l; do echo "::error::import : $l"; done
+            grep -E "ASC_|Error|error|rror" "$RUNNER_TEMP/signing.log" | head -5 | while read -r l; do echo "::warning::signing : $l"; done
+            exit 1; }
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k temp "$KC" > /dev/null
           security find-identity -v -p codesigning "$KC" | head -3 | while read -r l; do echo "::notice::$l"; done
           echo "KEYCHAIN=$KC" >> $GITHUB_ENV
