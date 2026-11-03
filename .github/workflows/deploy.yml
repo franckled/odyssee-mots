@@ -55,14 +55,44 @@ jobs:
           --base-href "/${{ github.event.repository.name }}/"
           --dart-define=WORKER_URL=${{ vars.WORKER_URL || secrets.WORKER_URL }}
 
-      - name: Ajouter le site vitrine
+      # L'application n'est plus publiée sur le web (elle reste compilée
+      # ci-dessus pour vérifier le code). Seuls la vitrine et la politique
+      # de confidentialité sont en ligne.
+      - name: Préparer le site public (sans l'application)
         run: |
-          mkdir -p build/web/vitrine
-          cp -R odyssee-mots-site/. build/web/vitrine/
+          rm -rf public && mkdir -p public/vitrine
+          cp -R odyssee-mots-site/. public/vitrine/
+          cp web/confidentialite.html public/
+          cp web/favicon.png public/ 2>/dev/null || true
+          cat > public/index.html <<'HTML'
+          <!doctype html>
+          <html lang="fr"><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Odyssée Mots</title>
+          <meta http-equiv="refresh" content="0; url=vitrine/">
+          <link rel="canonical" href="vitrine/">
+          <script>if('serviceWorker' in navigator){navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(x){x.unregister();});});}</script>
+          </head><body style="font-family:sans-serif;text-align:center;padding:40px">
+          <p><a href="vitrine/">Découvrir Odyssée Mots</a></p>
+          </body></html>
+          HTML
+          # Les navigateurs qui avaient ouvert l'ancienne application web
+          # gardent son service worker : celui-ci le désactive et vide le cache.
+          cat > public/flutter_service_worker.js <<'JS'
+          self.addEventListener('install', function () { self.skipWaiting(); });
+          self.addEventListener('activate', function (e) {
+            e.waitUntil((async function () {
+              for (const k of await caches.keys()) await caches.delete(k);
+              await self.registration.unregister();
+              for (const c of await self.clients.matchAll()) c.navigate(c.url);
+            })());
+          });
+          JS
+          find public -maxdepth 2 | sort
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: build/web
+          path: public
 
   deploy:
     needs: build
